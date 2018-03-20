@@ -11,4 +11,5 @@ Shotgun pipeline toolkit core platform, |release|
     utils
     descriptor
     authentication
+    cookbook
 
