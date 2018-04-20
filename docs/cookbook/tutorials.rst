@@ -10,7 +10,11 @@ understanding of how to use the Shotgun API and what you can do with it.
 .. toctree::
     :maxdepth: 1
 
-    examples/example_one
     examples/importing
     examples/register_publish
     examples/resolve_template_path
+    examples/values_from_path
+    examples/find_latest
+    examples/getting_context
+    examples/hook_tips_and_tricks
+    examples/find_latest

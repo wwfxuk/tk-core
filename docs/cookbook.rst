@@ -16,6 +16,6 @@ Some basic example scripts that we walk you through from beginning to end. Feel 
 and paste any of these into your own scripts.
 
 .. toctree::
-    :maxdepth: 3
+    :maxdepth: 2
 
     cookbook/tutorials

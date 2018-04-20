@@ -2,7 +2,9 @@
 Registering a PublishedFile
 ###############################
 
-At in its very simplest form this is all you need to do to register a publish file::
+At in its very simplest form this is all you need to do to register a publish file
+
+.. code-block:: python
 
     import sgtk
 
@@ -20,3 +22,11 @@ At in its very simplest form this is all you need to do to register a publish fi
 
     # now register the publish
     sgtk.util.register_publish(tk, ctx, publish_path, publish_name, version)
+
+
+Practical Applications
+----------------------
+
+Its sometimes useful to be able to register your own publishes through the api
+with out the publish app. This can be handy if you are running batch processes
+that are producing files.
