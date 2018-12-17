@@ -15,7 +15,11 @@ sudo: required
 
 matrix:
   include:
-  - python: "2.7"
+      - python: 2.7
+      - python: 2.7
+        env: SG_QT_LIBRARY=PySide
+      - python: 2.7
+        env: SG_QT_LIBRARY=PySide2
 
 install:
   - pip install https://github.com/shotgunsoftware/tk-build/archive/proof_of_concept.zip
@@ -24,7 +28,6 @@ install:
 
 # command to run tests
 script:
-  - python "import $SG_QT_LIBRARY"
   - tk-ci-tests
   - python tests/integration_tests/run_integration_tests.py --with-coverage
 
