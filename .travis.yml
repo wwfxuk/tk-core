@@ -19,9 +19,12 @@ matrix:
 
 install:
   - pip install https://github.com/shotgunsoftware/tk-build/archive/proof_of_concept.zip
+  - tk-ci-install
+
 
 # command to run tests
 script:
+  - python "import $SG_QT_LIBRARY"
   - tk-ci-tests
   - python tests/integration_tests/run_integration_tests.py --with-coverage
 

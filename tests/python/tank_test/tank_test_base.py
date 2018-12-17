@@ -123,11 +123,9 @@ def _is_pyside_missing():
     Tests is PySide is available.
     :returns: True is PySide is available, False otherwise.
     """
-    try:
-        import PySide # noqa
-        return False
-    except ImportError:
-        return True
+    from sgtk.util.qt_importer import QtImporter
+    qt_importer = QtImporter(QtImporter.QT4)
+    return qt_importer.QtCore is None
 
 
 def skip_if_pyside_missing(func):
