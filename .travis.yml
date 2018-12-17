@@ -27,6 +27,8 @@ install:
   - pip install https://github.com/shotgunsoftware/tk-build/archive/proof_of_concept.zip
 
 # command to run tests
-script: pytest && tk-docs
+script:
+  - pytest
+  - tk-docs
 # Only run coveralls if we actually ran tests. Otherwise this breaks coveralls it seems.
 after_success: test $SHOTGUN_COMPILE_ONLY = 0 && coveralls
