@@ -23,6 +23,7 @@ install:
 # command to run tests
 script:
   - tk-ci-tests
+  - python tests/integration_tests/run_integration_tests.py --with-coverage
 
 # Only run coveralls if we actually ran tests. Otherwise this breaks coveralls it seems.
 after_success: coveralls
