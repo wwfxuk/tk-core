@@ -12,7 +12,12 @@
 
 environment:
   matrix:
-    - PYTHON: "C:\\Python26"
+    - PATH: "C:\\Python27;%PATH%"
+      SG_QT_LIBRARY: null
+    - PATH: "C:\\Python27;%PATH%"
+      SG_QT_LIBRARY: PySide
+    - PATH: "C:\\Python27;%PATH%"
+      SG_QT_LIBRARY: PySide2
 
   # To update these values, visit AppVeyor's site, click the user icon and scroll down to Encrypt Data.
   SHOTGUN_HOST:
@@ -24,12 +29,10 @@ environment:
 
 build: off
 
+install:
+  - pip.exe install https://github.com/shotgunsoftware/tk-build/archive/proof_of_concept.zip
+  - tk-ci-install
+
 test_script:
-  # Put your test command here.
-  # If you don't need to build C extensions on 64-bit Python 3.3 or 3.4,
-  # you can remove "build.cmd" from the front of the command, as it's
-  # only needed to support those cases.
-  # Note that you must use the environment variable %PYTHON% to refer to
-  # the interpreter you're using - Appveyor does not do anything special
-  # to put the Python version you want to use on PATH.
-  - "tests\\run_appveyor.bat"
+  - tk-ci-tests
+
