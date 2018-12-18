@@ -10,25 +10,23 @@
 
 # travis-ci.org CI unit tests integration configuration file.
 
+sudo: true
 language: python
-sudo: required
 
 matrix:
   include:
-      - python: 2.7
-      - python: 2.7
-        env: SG_QT_LIBRARY=PySide
-      - python: 2.7
-        env: SG_QT_LIBRARY=PySide2
+    - python: 2.7
+    - python: 2.7
+      env: SG_QT_LIBRARY=PySide
+    - python: 2.7
+      env: SG_QT_LIBRARY=PySide2
 
 install:
   - pip install https://github.com/shotgunsoftware/tk-build/archive/proof_of_concept.zip
   - tk-ci-install
 
-
-# command to run tests
 script:
   - tk-ci-tests
-  # - python tests/integration_tests/run_integration_tests.py --with-coverage
+  - python tests/integration_tests/run_integration_tests.py --with-coverage
 
 after_success: coveralls
