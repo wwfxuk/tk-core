@@ -27,6 +27,5 @@ install:
 
 script:
   - tk-ci-tests
-  - python tests/integration_tests/run_integration_tests.py --with-coverage
 
 after_success: coveralls
