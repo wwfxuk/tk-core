@@ -16,8 +16,6 @@ environment:
       SG_QT_LIBRARY: null
     - PATH: "C:\\Python27;%PATH%"
       SG_QT_LIBRARY: PySide
-    - PATH: "C:\\Python27;%PATH%"
-      SG_QT_LIBRARY: PySide2
 
   # To update these values, visit AppVeyor's site, click the user icon and scroll down to Encrypt Data.
   SHOTGUN_HOST:
