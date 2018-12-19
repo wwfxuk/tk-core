@@ -11,11 +11,10 @@
 # https://www.appveyor.com/ Windows CI configuration file.
 
 environment:
+  PATH: "C:\\Python27;%PATH%"
   matrix:
-    - PATH: "C:\\Python27;%PATH%"
-      SG_QT_LIBRARY: null
-    - PATH: "C:\\Python27;%PATH%"
-      SG_QT_LIBRARY: PySide
+    - SG_QT_LIBRARY: null
+    - SG_QT_LIBRARY: PySide
 
   # To update these values, visit AppVeyor's site, click the user icon and scroll down to Encrypt Data.
   SHOTGUN_HOST:
