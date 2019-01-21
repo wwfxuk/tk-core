@@ -121,6 +121,65 @@ class QtImporter(object):
     def qt_version_tuple(self):
         return self._qt_version_tuple
 
+    @staticmethod
+    def _get_qt5_modules(qt_module_name):
+        """Import Qt5 modules into a dictionary.
+
+        Depending on the build of Qt 5 bindings being used, more or less
+        modules are supported. Instead of assuming a base set of
+        functionality, simply try every module one at a time.
+
+        First, if a module is missing the __import__ function doesn't raise
+        an exception. This is why we have to test for existence of the
+        attribute on the Qt 5 bindings module.
+
+        Second, if the library couldn't load because of missing symbols with
+        in Qt (e.g. both Maya 2017 and the Qt 5 bindings built on my machine
+        are missing some symbols in order to load QtScriptTools),
+        it will raise an ImportError.
+
+        Testing each module like this individually helps get as many as
+        possible.
+
+        :param qt_module_name: Name of the Qt Python binding library.
+        :type qt_module_name: str
+
+        :returns: Module names mapped to their respective module objects.
+        :rtype: dict[str, module]
+        """
+        modules_dict = {}
+
+        # List of all Qt 5 modules.
+        sub_modules = [
+            "QtCore", "QtGui", "QtHelp", "QtNetwork", "QtPrintSupport",
+            "QtQml", "QtQuick", "QtQuickWidgets", "QtScript", "QtSvg",
+            "QtTest", "QtUiTools", "QtWebChannel", "QtWebKit",
+            "QtWebKitWidgets", "QtWidgets", "QtWebSockets", "QtXml",
+            "QtXmlPatterns", "QtScriptSql", "QtScriptTools", "QtOpenGL",
+            "QtMultimedia",
+        ]
+
+        # We have the potential for a deadlock in Maya 2018 on Windows if this
+        # is imported. We set the env var from the tk-maya engine when we
+        # detect that we are in this situation.
+        if "SHOTGUN_SKIP_QTWEBENGINEWIDGETS_IMPORT" not in os.environ:
+            sub_modules.append("QtWebEngineWidgets")
+
+        for module_name in sub_modules:
+            try:
+                wrapper = __import__(
+                    qt_module_name,
+                    globals(),
+                    locals(),
+                    [module_name],
+                )
+                if hasattr(wrapper, module_name):
+                    modules_dict[module_name] = getattr(wrapper, module_name)
+            except Exception as e:
+                logger.debug("'%s' was skipped: %s", module_name, e)
+
+        return modules_dict
+
     def _import_module_by_name(self, parent_module_name, module_name):
         """
         Import a module by its string name.
