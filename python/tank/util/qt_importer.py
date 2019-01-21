@@ -237,47 +237,37 @@ class QtImporter(object):
         # imported even if the Qt binaries are missing, so it's better to try importing QtCore for
         # testing.
         from PySide2 import QtCore
-
-        # List of all Qt 5 modules.
-        sub_modules = [
-            "QtGui", "QtHelp", "QtNetwork", "QtPrintSupport", "QtQml", "QtQuick", "QtQuickWidgets",
-            "QtScript", "QtSvg", "QtTest", "QtUiTools", "QtWebChannel",
-            "QtWebKit", "QtWebKitWidgets", "QtWidgets", "QtWebSockets", "QtXml", "QtXmlPatterns",
-            "QtScriptSql", "QtScriptTools", "QtOpenGL", "QtMultimedia"
-        ]
-
-        # We have the potential for a deadlock in Maya 2018 on Windows if this
-        # is imported. We set the env var from the tk-maya engine when we
-        # detect that we are in this situation.
-        if "SHOTGUN_SKIP_QTWEBENGINEWIDGETS_IMPORT" not in os.environ:
-            sub_modules.append("QtWebEngineWidgets")
-
-        modules_dict = {
-            "QtCore": QtCore
-        }
-
-        # Depending on the build of PySide 2 being used, more or less modules are supported. Instead
-        # of assuming a base set of functionality, simply try every module one at a time.
-        #
-        # First, if a module is missing the __import__ function doesn't raise an exception.
-        # This is why we have to test for existence of the attribute on the PySide 2 module.
-        #
-        # Second, if the library couldn't load because of missing symbols with in Qt (e.g.
-        # both Maya 2017 and the PySide 2 built on my machine are missing some symbols in order to load
-        # QtScriptTools), it will raise an ImportError.
-        #
-        # Testing each module like this individually helps get as many as possible.
-        for module_name in sub_modules:
-            try:
-                wrapper = __import__("PySide2", globals(), locals(), [module_name])
-                if hasattr(wrapper, module_name):
-                    modules_dict[module_name] = getattr(wrapper, module_name)
-            except Exception as e:
-                logger.debug("'%s' was skipped: %s", module_name, e)
-                pass
-
         import PySide2
-        return PySide2.__name__, PySide2.__version__, PySide2, modules_dict, self._to_version_tuple(QtCore.qVersion())
+        return (
+            PySide2.__name__,
+            PySide2.__version__,
+            PySide2,
+            self._get_qt5_modules(PySide2.__name__),
+            self._to_version_tuple(QtCore.qVersion()),
+        )
+
+    def _import_pyqt5(self):
+        """
+        This will be called at initialization to discover every PyQt 5 modules.
+
+        :returns: "PyQt5", PyQt version, PyQt5 module, Qt* modules dictionary
+                  and tuple for Qt version.
+        :rtype: tuple
+        """
+        # Quick check if PyQt 5 is available.
+        # Try to import a well known module. If that fails it will
+        # throw an import error which will be handled by the calling code.
+        # Note that PyQt5 can be imported even if the Qt binaries are missing,
+        # so it's better to try importing QtCore for testing.
+        from PyQt5 import QtCore
+        import PyQt5
+        return (
+            PyQt5.__name__,
+            QtCore.PYQT_VERSION_STR,
+            PyQt5,
+            self._get_qt5_modules(PyQt5.__name__),
+            self._to_version_tuple(QtCore.qVersion()),
+        )
 
     def _import_pyside2_as_pyside(self):
         """
@@ -361,7 +351,7 @@ class QtImporter(object):
                 pyside2 = self._import_pyside2_as_pyside()
                 logger.debug("Imported PySide2 as PySide.")
                 return pyside2
-            except ImportError as e:
+            except ImportError:
                 pass
         elif interface_version_requested == self.QT5:
             try:
