@@ -15,8 +15,6 @@ import os
 from .errors import TankError
 from .log import LogManager
 import logging
-
-
 """
 Container class used to store possible resolved values during template
 parsing.  Stores the possible value as well as the downstream hierarchy
@@ -198,6 +196,8 @@ class TemplatePathParser(object):
 
         # ensure that we only have a single set of valid values for all keys.  If we don't
         # then attempt to report the best error we can
+        from pprint import pformat
+        self.logger.debug(pformat(possible_values))
         fields = {}
         for key in self.ordered_keys:
             key_value = None
@@ -225,21 +225,30 @@ class TemplatePathParser(object):
                     key_value = resolved_possible_values[0].value
                     possible_values = resolved_possible_values[
                         0].downstream_values
-                elif num_resolved > 1:
-                    # found more than one valid value so value is ambiguous!
-                    self.last_error = (
-                        "Ambiguous values found for key '%s' could be any of: '%s'"
-                        % (key.name, "', '".join(
-                            [v.value for v in resolved_possible_values])))
-                    return None
                 else:
-                    # didn't find any fully resolved values so we have multiple
-                    # non-fully resolved values which also means the value is ambiguous!
-                    self.last_error = (
-                        "Ambiguous values found for key '%s' could be any of: '%s'"
-                        % (key.name, "', '".join(
-                            [v.value for v in possible_values])))
-                    return None
+                    if num_resolved > 1:
+                        # found more than one valid value so value is ambiguous!
+                        ambiguous_results = resolved_possible_values
+                    else:
+                        # didn't find any fully resolved values so we have multiple
+                        # non-fully resolved values which also means the value is ambiguous!
+                        ambiguous_results = possible_values
+
+                    # Try get a solution from previously found result, if any
+                    ambiguous_values = [v.value for v in ambiguous_results]
+                    key_value = fields.get(key.name)
+                    if key_value is not None and key_value in ambiguous_values:
+                        possible_values = ambiguous_results[
+                            ambiguous_values.index(
+                                key_value)].downstream_values
+                    else:
+                        self.logger.debug('key_value: %s', key_value)
+                        self.logger.debug('ambiguous_values: %s', ambiguous_values)
+                        self.logger.debug('fields: %s', fields)
+                        self.last_error = (
+                            "Ambiguous values found for key '%s' could be any of: '%s'"
+                            % (key.name, "', '".join(ambiguous_values)))
+                        return None
 
             # if key isn't a skip key then add it to the fields dictionary:
             if key_value is not None and key.name not in skip_keys:
@@ -299,7 +308,10 @@ class TemplatePathParser(object):
             # from this, find the possible value:
             possible_value = None
             last_error = None
-            if key.name not in skip_keys:
+            if key.name in skip_keys:
+                # don't bother doing validation/conversion for this value as it's being skipped!
+                possible_value = possible_value_str
+            else:
                 # validate the value for this key:
 
                 # slashes are not allowed in key values!  Note, the possible value is a section
@@ -318,7 +330,8 @@ class TemplatePathParser(object):
 
                 # get the actual value for this key - this will also validate the value:
                 try:
-                    self.logger.warning('Resolving "%s" using "%s"', key.name, possible_value_str)
+                    self.logger.debug('Resolving "%s" using "%s"', key.name,
+                                      possible_value_str)
                     possible_value = key.value_from_str(possible_value_str)
                 except TankError as e:
                     # it appears some locales are not able to correctly encode
@@ -328,11 +341,7 @@ class TemplatePathParser(object):
                                   (self, key.name, e))
                     continue
 
-            else:
-                # don't bother doing validation/conversion for this value as it's being skipped!
-                possible_value = possible_value_str
-
-            self.logger.warning('--> "%s"', possible_value)
+            self.logger.debug('--> "%s"', possible_value)
             downstream_values = []
             fully_resolved = False
             if keys:
@@ -353,22 +362,27 @@ class TemplatePathParser(object):
                     # resolved and find the last error found if any
                     fully_resolved = False
                     for v in downstream_values:
+                        self.logger.debug('Checking downstream: %s', v)
                         if v.fully_resolved:
                             fully_resolved = True
                         if v.last_error:
                             last_error = v.last_error
+                            self.logger.debug('x Found error: %s', last_error)
 
             elif tokens:
                 # we don't have keys but we still have remaining tokens - this is bad!
                 fully_resolved = False
+                self.logger.debug('x Tokens remain')
             elif token_position + len(token) != len(path):
                 # no keys or tokens left but we haven't fully consumed the path either!
                 fully_resolved = False
+                self.logger.debug('x Path not fully consumed')
             else:
                 # processed all keys and tokens and fully consumed the path
                 fully_resolved = True
 
             # keep track of the possible values:
+            self.logger.debug('{:-^80}'.format(fully_resolved))
             possible_values.append(
                 ResolvedValue(possible_value, downstream_values,
                               fully_resolved, last_error))
