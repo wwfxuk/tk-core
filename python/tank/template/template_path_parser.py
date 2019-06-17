@@ -11,10 +11,12 @@
 Parsing of template paths into values for specified keys using a list of static tokens
 """
 from collections import namedtuple
-import os
-from .errors import TankError
-from .log import LogManager
 import logging
+import os
+
+from ..errors import TankError
+from ..log import LogManager
+
 """
 Container class used to store possible resolved values during template
 parsing.  Stores the possible value as well as the downstream hierarchy
