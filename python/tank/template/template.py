@@ -96,14 +96,6 @@ class Template(object):
                 'static_tokens': self._calc_static_tokens(var_definition),
             }
 
-        # get format keys and types
-        self._keys = []
-        self._ordered_keys = []
-        for variation in variations:
-            var_keys, ordered_keys = self._keys_from_definition(variation, name, keys)
-            self._keys.append(var_keys)
-            self._ordered_keys.append(ordered_keys)
-
     def __repr__(self):
         class_name = self.__class__.__name__
         if self.name:
@@ -135,6 +127,19 @@ class Template(object):
             var_info['static_tokens']
             for var_info in self._variations.values()
         ]
+
+    @property
+    def _keys(self):
+        """
+        All keys in a nested list of lists.
+
+        Not sure why test_templatepath cares about this but here it is for
+        legacy/fallback sake.
+
+        :return: List of keys lists from all variations.
+        :rtype: list[list[str]]
+        """
+        return [var_info['keys'] for var_info in self._variations.values()]
 
     @property
     def keys(self):
@@ -209,7 +214,7 @@ class Template(object):
         else:
             required_keys = keys
 
-        return [x for x in required_keys if (x not in fields) or  (fields[x] is None)]
+        return [key for key in required_keys if fields.get(key) is None]
 
     def apply_fields(self, fields, platform=None):
         """
@@ -295,7 +300,7 @@ class Template(object):
         processed_fields = {}
         for key_name, key in keys.items():
             value = fields.get(key_name)
-            ignore_type =  key_name in ignore_types
+            ignore_type = key_name in ignore_types
             processed_fields[key_name] = key.str_from_value(value, ignore_type=ignore_type)
 
         variation = list(self._variations.values())[index]
@@ -403,11 +408,15 @@ class Template(object):
 
 
         :param path:            Path to validate
-        :param required_fields: An optional dictionary of key names to key values. If supplied these values must
-                                be present in the input path and found by the template.
-        :param skip_keys:       List of field names whose values should be ignored
+        :param required_fields: An optional dictionary of key names to key
+                                values. If supplied these values must be
+                                present in the input path and found by the
+                                template.
+        :param skip_keys:       List of field names whose values should be
+                                ignored
 
-        :returns:               Dictionary of fields found from the path or None if path fails to validate
+        :returns:               Dictionary of fields found from the path or
+                                None if path fails to validate
         """
         required_fields = required_fields or {}
         skip_keys = skip_keys or []
@@ -448,7 +457,7 @@ class Template(object):
         :returns:           True if the path is valid for this template
         :rtype:             Bool
         """
-        return self.validate_and_get_fields(path, fields, skip_keys) != None
+        return self.validate_and_get_fields(path, fields, skip_keys) is not None
 
     def get_fields(self, input_path, skip_keys=None):
         """
@@ -479,7 +488,7 @@ class Template(object):
             static_tokens = var_info['static_tokens']
             path_parser = TemplatePathParser(ordered_keys, static_tokens)
             fields = path_parser.parse_path(input_path, skip_keys)
-            if fields != None:
+            if fields is not None:
                 break
 
         if fields is None:
