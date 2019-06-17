@@ -90,7 +90,7 @@ class TemplatePathParser(object):
 
         return fields
 
-    def _iter_token_positions(self):
+    def _get_token_positions(self):
         """Find all occurrences of all tokens in the path.
 
 
@@ -109,12 +109,15 @@ class TemplatePathParser(object):
         :yields list[int]: Positions of index the token is found at.
         """
         start_pos = 0
+        max_index = len(self.input_path)
+        token_positions = []
+
         for token in self.static_tokens:
             positions = []
             token_pos = start_pos
 
             while token_pos >= 0:
-                token_pos = self.input_path.find(token, token_pos)
+                token_pos = self.input_path.find(token, token_pos, max_index)
                 if token_pos >= 0:
                     if not positions:
                         # this is the first instance of this token we found so it
@@ -124,13 +127,29 @@ class TemplatePathParser(object):
                     positions.append(token_pos)
                     token_pos += len(token)
 
-            yield positions
-            if not positions:
+            if positions:
+                token_positions.append(positions)
+            else:
                 self._error("Tried to extract fields but the path does not "
                             "fit the template:\n%s\n%s^--- Failed to find "
                             "token \"%s\" from here",
                             self.input_path, " " * start_pos, token)
                 break
+
+        else:  # No break from: for token in self.static_tokens
+            # Remove positions that can't be valid after for loop completed
+            # i.e. Where the position is greater than the
+            #      last possible position of any subsequent tokens
+            for index in reversed(range(len(token_positions))):
+                new_positions = [
+                    position
+                    for position in token_positions[index]
+                    if position < max_index
+                ]
+                token_positions[index] = new_positions
+                max_index = max(new_positions) if new_positions else 0
+
+        return token_positions
 
     def parse_path(self, input_path, skip_keys):
         """
@@ -173,20 +192,12 @@ class TemplatePathParser(object):
             self.fields = self._empty_ordered_keys_fields()
             return self.fields
 
-        token_positions = list(self._iter_token_positions())
+        token_positions = self._get_token_positions()
         if not(token_positions and token_positions[-1]):
             # didn't find all tokens!
             return None
 
-        # disgard positions that can't be valid - e.g. where the position is greater than the
-        # last possible position of any subsequent tokens:
-        max_position = len(self.input_path) + 1
-        for ti in reversed(range(len(token_positions))):
-            token_positions[ti] = [
-                p for p in token_positions[ti] if p < max_position
-            ]
-            max_position = max(
-                token_positions[ti]) if token_positions[ti] else 0
+        # ------------------------------>8-------------------------------------
 
         # find all possible values for keys based on token positions - this will
         # return a list of lists including all potential variations:
@@ -232,7 +243,7 @@ class TemplatePathParser(object):
         # then attempt to report the best error we can
         from pprint import pformat
         self.logger.debug(pformat(possible_values))
-        fields = {}
+        self.fields = {}
         for key in self.ordered_keys:
             key_value = None
             if not possible_values:
@@ -270,7 +281,7 @@ class TemplatePathParser(object):
 
                     # Try get a solution from previously found result, if any
                     ambiguous_values = [v.value for v in ambiguous_results]
-                    key_value = fields.get(key.name)
+                    key_value = self.fields.get(key.name)
                     if key_value is not None and key_value in ambiguous_values:
                         possible_values = ambiguous_results[
                             ambiguous_values.index(
@@ -278,18 +289,20 @@ class TemplatePathParser(object):
                     else:
                         self.logger.debug('key_value: %s', key_value)
                         self.logger.debug('ambiguous_values: %s', ambiguous_values)
-                        self.logger.debug('fields: %s', fields)
+                        self.logger.debug('self.fields: %s', self.fields)
                         self.last_error = (
                             "Ambiguous values found for key '%s' could be any of: '%s'"
                             % (key.name, "', '".join(ambiguous_values)))
                         return None
 
-            # if key isn't a skip key then add it to the fields dictionary:
+            # if key isn't a skip key then add it to the self.fields dictionary:
             if key_value is not None and key.name not in skip_keys:
-                fields[key.name] = key_value
+                self.fields[key.name] = key_value
 
-        # return the single unique set of fields:
-        return fields
+        # ------------------------------>8-------------------------------------
+
+        # return the single unique set of self.fields:
+        return self.fields
 
     def __find_possible_key_values_recursive(self,
                                              path,
