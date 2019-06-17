@@ -57,7 +57,7 @@ class TemplatePathParser(object):
         self.last_error = None
         self.logger = LogManager.get_logger(self.__class__.__name__)
         file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
-        file_handler.setLevel(logging.DEBUG)
+        file_handler.setLevel(logging.INFO)
         self.logger.addHandler(file_handler)
 
     def _error(self, message, *message_args):
@@ -161,11 +161,12 @@ class TemplatePathParser(object):
                             to their values. None if fields can't be resolved.
         """
         skip_keys = skip_keys or []
+        input_path = os.path.normpath(input_path)
         self.fields = {}
         self.last_error = None
 
         # all token comparisons are done case insensitively.
-        self.input_path = os.path.normpath(input_path).lower()
+        self.input_path = input_path.lower()
 
         # if no keys, nothing to discover
         if not self.ordered_keys:
