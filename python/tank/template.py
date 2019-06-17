@@ -1,11 +1,11 @@
 # Copyright (c) 2013 Shotgun Software Inc.
-# 
+#
 # CONFIDENTIAL AND PROPRIETARY
-# 
-# This work is provided "AS IS" and subject to the Shotgun Pipeline Toolkit 
+#
+# This work is provided "AS IS" and subject to the Shotgun Pipeline Toolkit
 # Source Code License included in this distribution package. See LICENSE.
-# By accessing, using, copying or modifying this work you indicate your 
-# agreement to the Shotgun Pipeline Toolkit Source Code License. All rights 
+# By accessing, using, copying or modifying this work you indicate your
+# agreement to the Shotgun Pipeline Toolkit Source Code License. All rights
 # not expressly granted therein are reserved by Shotgun Software Inc.
 
 """
@@ -13,6 +13,7 @@ Management of file and directory templates.
 
 """
 
+from collections import OrderedDict
 import os
 import re
 import sys
@@ -27,7 +28,7 @@ class Template(object):
     Represents an expression containing several dynamic tokens
     in the form of :class:`TemplateKey` objects.
     """
-       
+
     @classmethod
     def _keys_from_definition(cls, definition, template_name, keys):
         """Extracts Template Keys from a definition.
@@ -58,8 +59,8 @@ class Template(object):
                 names_keys[key.name] = key
                 ordered_keys.append(key)
         return names_keys, ordered_keys
-        
-    def __init__(self, definition, keys, name=None):
+
+    def __init__(self, definition, keys, name=None, prefix=''):
         """
         This class is not designed to be used directly but
         should be subclassed by any Template implementations.
@@ -70,17 +71,31 @@ class Template(object):
         :param definition: Template definition.
         :type definition: String
         :param keys: Mapping of key names to keys
-        :type keys: Dictionary 
+        :type keys: Dictionary
         :param name: (Optional) name for this template.
         :type name: String
+        :param prefix: (Optional) Internal use: prefix for calculating static
+                       tokens and root paths.
+        :type prefix: String
         """
         self.name = name
+        self._prefix = prefix
+
         # version for __repr__
         self._repr_def = self._fix_key_names(definition, keys)
 
         variations = self._definition_variations(definition)
-        # We want them most inclusive(longest) version first
-        variations.sort(key=lambda x: len(x), reverse=True)
+        self._variations = OrderedDict()
+        for var_name in variations:
+            var_keys, ordered_keys = self._keys_from_definition(var_name, name, keys)
+            var_definition = self._fix_key_names(var_name, keys)
+            self._variations[var_name] = {
+                'keys': var_keys,
+                'ordered_keys': ordered_keys,
+                'definition': var_definition,
+                'cleaned_definition': self._clean_definition(var_definition),
+                'static_tokens': self._calc_static_tokens(var_definition),
+            }
 
         # get format keys and types
         self._keys = []
@@ -89,20 +104,6 @@ class Template(object):
             var_keys, ordered_keys = self._keys_from_definition(variation, name, keys)
             self._keys.append(var_keys)
             self._ordered_keys.append(ordered_keys)
-
-        # substitute aliased key names
-        self._definitions = []
-        for variation in variations:
-            self._definitions.append(self._fix_key_names(variation, keys))
-
-        # get defintion ready for string substitution
-        self._cleaned_definitions = []
-        for definition in self._definitions:
-            self._cleaned_definitions.append(self._clean_definition(definition))
-
-        # string which will be prefixed to definition
-        self._prefix = ''
-        self._static_tokens = []
 
     def __repr__(self):
         class_name = self.__class__.__name__
@@ -117,8 +118,24 @@ class Template(object):
         The template as a string, e.g ``shots/{Shot}/{Step}/pub/{name}.v{version}.ma``
         """
         # Use first definition as it should be most inclusive in case of variations
-        return self._definitions[0]
+        first_variation = list(self._variations.values())[0]
+        return first_variation['definition']
 
+    @property
+    def _static_tokens(self):
+        """
+        All static tokens in a nested list of lists.
+
+        Not sure why test_templatepath cares about this but here it is for
+        legacy/fallback sake.
+
+        :return: List of static tokens lists from all variations.
+        :rtype: list[list[str]]
+        """
+        return [
+            var_info['static_tokens']
+            for var_info in self._variations.values()
+        ]
 
     @property
     def keys(self):
@@ -126,7 +143,7 @@ class Template(object):
         The keys that this template is using. For a template
         ``shots/{Shot}/{Step}/pub/{name}.v{version}.ma``, the keys are ``{Shot}``,
         ``{Step}`` and ``{name}``.
-        
+
         :returns: a dictionary of class:`TemplateKey` objects, keyed by token name.
         """
         # First keys should be most inclusive
@@ -143,7 +160,7 @@ class Template(object):
         :param key_name: Name of template key for which the check should be carried out
         :returns: True if key is optional, False if not.
         """
-        # the key is required if it's in the 
+        # the key is required if it's in the
         # minimum set of keys for this template
         if key_name in min(self._keys):
             # this key is required
@@ -155,12 +172,12 @@ class Template(object):
         """
         Determines keys required for use of template which do not exist
         in a given fields.
-        
+
         Example::
-        
+
             >>> tk.templates["max_asset_work"].missing_keys({})
             ['Step', 'sg_asset_type', 'Asset', 'version', 'name']
-        
+
             >>> tk.templates["max_asset_work"].missing_keys({"name": "foo"})
             ['Step', 'sg_asset_type', 'Asset', 'version']
 
@@ -169,7 +186,7 @@ class Template(object):
         :type fields: mapping (dictionary or other)
         :param skip_defaults: If true, do not treat keys with default values as missing.
         :type skip_defaults: Bool
-        
+
         :returns: Fields needed by template which are not in inputs keys or which have
                   values of None.
         :rtype: list
@@ -230,10 +247,10 @@ class Template(object):
             'Maya Scene henry, v003'
 
 
-        :param fields: Mapping of keys to fields. Keys must match those in template 
+        :param fields: Mapping of keys to fields. Keys must match those in template
                        definition.
-        :param platform: Optional operating system platform. If you leave it at the 
-                         default value of None, paths will be created to match the 
+        :param platform: Optional operating system platform. If you leave it at the
+                         default value of None, paths will be created to match the
                          current operating system. If you pass in a sys.platform-style string
                          (e.g. ``win32``, ``linux2`` or ``darwin``), paths will be generated to
                          match that platform.
@@ -246,18 +263,18 @@ class Template(object):
         """
         Creates path using fields.
 
-        :param fields: Mapping of keys to fields. Keys must match those in template 
+        :param fields: Mapping of keys to fields. Keys must match those in template
                        definition.
         :param ignore_types: Keys for whom the defined type is ignored as list of strings.
                             This allows setting a Key whose type is int with a string value.
-        :param platform: Optional operating system platform. If you leave it at the 
-                         default value of None, paths will be created to match the 
+        :param platform: Optional operating system platform. If you leave it at the
+                         default value of None, paths will be created to match the
                          current operating system. If you pass in a sys.platform-style string
-                         (e.g. 'win32', 'linux2' or 'darwin'), paths will be generated to 
+                         (e.g. 'win32', 'linux2' or 'darwin'), paths will be generated to
                          match that platform.
 
         :returns: Full path, matching the template with the given fields inserted.
-        """        
+        """
         ignore_types = ignore_types or []
 
         # find largest key mapping without missing values
@@ -270,30 +287,30 @@ class Template(object):
                 keys = cur_keys
                 break
 
-        
         if keys is None:
             raise TankError("Tried to resolve a path from the template %s and a set "
                             "of input fields '%s' but the following required fields were missing "
                             "from the input: %s" % (self, fields, missing_keys))
 
-        # Process all field values through template keys 
+        # Process all field values through template keys
         processed_fields = {}
         for key_name, key in keys.items():
             value = fields.get(key_name)
             ignore_type =  key_name in ignore_types
             processed_fields[key_name] = key.str_from_value(value, ignore_type=ignore_type)
 
-        return self._cleaned_definitions[index] % processed_fields
+        variation = list(self._variations.values())[index]
+        return variation['cleaned_definition'] % processed_fields
 
     def _definition_variations(self, definition):
         """
         Determines all possible definition based on combinations of optional sectionals.
-        
+
         "{foo}"               ==> ['{foo}']
         "{foo}_{bar}"         ==> ['{foo}_{bar}']
         "{foo}[_{bar}]"       ==> ['{foo}', '{foo}_{bar}']
         "{foo}_[{bar}_{baz}]" ==> ['{foo}_', '{foo}_{bar}_{baz}']
-        
+
         """
         # split definition by optional sections
         tokens = re.split("(\[[^]]*\])", definition)
@@ -307,7 +324,7 @@ class Template(object):
                 continue
             if token.startswith('['):
                 # check that optional contains a key
-                if not re.search("{*%s}" % constants.TEMPLATE_KEY_NAME_REGEX, token): 
+                if not re.search("{*%s}" % constants.TEMPLATE_KEY_NAME_REGEX, token):
                     raise TankError("Optional sections must include a key definition.")
 
                 # Add definitions skipping this optional value
@@ -316,7 +333,7 @@ class Template(object):
                 token = re.sub('[\[\]]', '', token)
 
             # check non-optional contains no dangleing brackets
-            if re.search("[\[\]]", token): 
+            if re.search("[\[\]]", token):
                 raise TankError("Square brackets are not allowed outside of optional section definitions.")
 
             # make defintions with token appended
@@ -325,9 +342,8 @@ class Template(object):
 
             definitions = temp_definitions
 
-        return definitions
-
-
+        # We want them most inclusive(longest) version first
+        return sorted(definitions, key=lambda x: len(x), reverse=True)
 
     def _fix_key_names(self, definition, keys):
         """
@@ -352,7 +368,7 @@ class Template(object):
         Finds the tokens from a definition which are not involved in defining keys.
         """
         # expand the definition to include the prefix unless the definition is empty in which
-        # case we just want to parse the prefix.  For example, in the case of a path template, 
+        # case we just want to parse the prefix.  For example, in the case of a path template,
         # having an empty definition would result in expanding to the project/storage root
         expanded_definition = os.path.join(self._prefix, definition) if definition else self._prefix
         regex = r"{%s}" % constants.TEMPLATE_KEY_NAME_REGEX
@@ -388,22 +404,22 @@ class Template(object):
 
 
         :param path:            Path to validate
-        :param required_fields: An optional dictionary of key names to key values. If supplied these values must 
+        :param required_fields: An optional dictionary of key names to key values. If supplied these values must
                                 be present in the input path and found by the template.
         :param skip_keys:       List of field names whose values should be ignored
 
-        :returns:               Dictionary of fields found from the path or None if path fails to validate 
+        :returns:               Dictionary of fields found from the path or None if path fails to validate
         """
         required_fields = required_fields or {}
         skip_keys = skip_keys or []
-        
+
         # Path should split into keys as per template
         path_fields = {}
         try:
             path_fields = self.get_fields(path, skip_keys=skip_keys)
         except TankError:
             return None
-        
+
         # Check that all required fields were found in the path:
         for key, value in required_fields.items():
             if (key not in skip_keys) and (path_fields.get(key) != value):
@@ -422,10 +438,10 @@ class Template(object):
             >>> bad_path = '/studio_root/sgtk/demo_project_1/shot_2/comp/publish/henry.v003.ma'
             >>> template_path.validate(bad_path)
             False
-                            
+
         :param path:        Path to validate
         :type path:         String
-        :param fields:      An optional dictionary of key names to key values. If supplied these values must 
+        :param fields:      An optional dictionary of key names to key values. If supplied these values must
                             be present in the input path and found by the template.
         :type fields:       Dictionary
         :param skip_keys:   Field names whose values should be ignored
@@ -434,7 +450,7 @@ class Template(object):
         :rtype:             Bool
         """
         return self.validate_and_get_fields(path, fields, skip_keys) != None
-        
+
     def get_fields(self, input_path, skip_keys=None):
         """
         Extracts key name, value pairs from a string. Example::
@@ -447,7 +463,7 @@ class Template(object):
              'Step': 'comp',
              'name': 'henry',
              'version': 3}
-        
+
         :param input_path: Source path for values
         :type input_path: String
         :param skip_keys: Optional keys to skip
@@ -459,7 +475,9 @@ class Template(object):
         path_parser = None
         fields = None
 
-        for ordered_keys, static_tokens in zip(self._ordered_keys, self._static_tokens):
+        for var_info in self._variations.values():
+            ordered_keys = var_info['ordered_keys']
+            static_tokens = var_info['static_tokens']
             path_parser = TemplatePathParser(ordered_keys, static_tokens)
             fields = path_parser.parse_path(input_path, skip_keys)
             if fields != None:
@@ -485,26 +503,18 @@ class TemplatePath(Template):
         :param keys: Mapping of key names to keys (dict)
         :param root_path: Path to project root for this template.
         :param name: Optional name for this template.
-        :param per_platform_roots: Root paths for all supported operating systems. 
+        :param per_platform_roots: Root paths for all supported operating systems.
                                    This is a dictionary with sys.platform-style keys
         """
-        super(TemplatePath, self).__init__(definition, keys, name=name)
-        self._prefix = root_path
+        super(TemplatePath, self).__init__(definition, keys, name=name, prefix=root_path)
         self._per_platform_roots = per_platform_roots
 
-        # Make definition use platform separator
-        for index, rel_definition in enumerate(self._definitions):
-            self._definitions[index] = os.path.join(*split_path(rel_definition))
-
-        # get definition ready for string substitution
-        self._cleaned_definitions = []
-        for definition in self._definitions:
-            self._cleaned_definitions.append(self._clean_definition(definition))
-
-        # split by format strings the definition string into tokens 
-        self._static_tokens = []
-        for definition in self._definitions:
-            self._static_tokens.append(self._calc_static_tokens(definition))
+        # Make definition use platform separator, re-caclulate other attributes
+        for var_info in self._variations.values():
+            definition = os.path.join(*split_path(var_info['definition']))
+            var_info['definition'] = definition
+            var_info['cleaned_definition'] = self._clean_definition(definition)
+            var_info['static_tokens'] = self._calc_static_tokens(definition)
 
     @property
     def root_path(self):
@@ -531,24 +541,24 @@ class TemplatePath(Template):
         """
         Creates path using fields.
 
-        :param fields: Mapping of keys to fields. Keys must match those in template 
+        :param fields: Mapping of keys to fields. Keys must match those in template
                        definition.
         :param ignore_types: Keys for whom the defined type is ignored as list of strings.
                             This allows setting a Key whose type is int with a string value.
-        :param platform: Optional operating system platform. If you leave it at the 
-                         default value of None, paths will be created to match the 
+        :param platform: Optional operating system platform. If you leave it at the
+                         default value of None, paths will be created to match the
                          current operating system. If you pass in a sys.platform-style string
-                         (e.g. 'win32', 'linux2' or 'darwin'), paths will be generated to 
+                         (e.g. 'win32', 'linux2' or 'darwin'), paths will be generated to
                          match that platform.
 
         :returns: Full path, matching the template with the given fields inserted.
-        """        
+        """
         relative_path = super(TemplatePath, self)._apply_fields(fields, ignore_types, platform)
-        
+
         if platform is None:
             # return the current OS platform's path
             return os.path.join(self.root_path, relative_path) if relative_path else self.root_path
-    
+
         else:
             # caller has requested a path for another OS
             if self._per_platform_roots is None:
@@ -558,14 +568,14 @@ class TemplatePath(Template):
                 raise TankError("Template %s cannot resolve path for operating system '%s' - "
                                 "it was instantiated in a mode which only supports the resolving "
                                 "of current operating system paths." % (self, platform))
-            
+
             platform_root_path = self._per_platform_roots.get(platform)
-            
+
             if platform_root_path is None:
                 # either the platform is undefined or unknown
                 raise TankError("Cannot resolve path for operating system '%s'! Please ensure "
                                 "that you have a valid storage set up for this platform." % platform)
-            
+
             elif platform == "win32":
                 # use backslashes for windows
                 if relative_path:
@@ -573,15 +583,15 @@ class TemplatePath(Template):
                 else:
                     # not path generated - just return the root path
                     return platform_root_path
-            
+
             elif platform == "darwin" or "linux" in platform:
                 # unix-like plaforms - use slashes
                 if relative_path:
                     return "%s/%s" % (platform_root_path, relative_path.replace(os.sep, "/"))
                 else:
-                    # not path generated - just return the root path 
+                    # not path generated - just return the root path
                     return platform_root_path
-            
+
             else:
                 raise TankError("Cannot evaluate path. Unsupported platform '%s'." % platform)
 
@@ -604,15 +614,9 @@ class TemplateString(Template):
         :param name: Optional name for this template.
         :param validate_with: Optional :class:`Template` to use for validation
         """
-        super(TemplateString, self).__init__(definition, keys, name=name)
+        super(TemplateString, self).__init__(definition, keys, name=name, prefix="@")
         self.validate_with = validate_with
-        self._prefix = "@"
 
-        # split by format strings the definition string into tokens 
-        self._static_tokens = []
-        for definition in self._definitions:
-            self._static_tokens.append(self._calc_static_tokens(definition))
-    
     @property
     def parent(self):
         """
@@ -663,19 +667,19 @@ def read_templates(pipeline_configuration):
     :param pipeline_configuration: pipeline config object
 
     :returns: Dictionary of form {template name: template object}
-    """    
+    """
     per_platform_roots = pipeline_configuration.get_all_platform_data_roots()
-    data = pipeline_configuration.get_templates_config()            
-    
+    data = pipeline_configuration.get_templates_config()
+
     # get dictionaries from the templates config file:
     def get_data_section(section_name):
-        # support both the case where the section 
+        # support both the case where the section
         # name exists and is set to None and the case where it doesn't exist
         d = data.get(section_name)
         if d is None:
             d = {}
-        return d            
-            
+        return d
+
     keys = templatekey.make_keys(get_data_section("keys"))
 
     template_paths = make_template_paths(
@@ -705,7 +709,7 @@ def make_template_paths(data, keys, all_per_platform_roots, default_root=None):
     :param data: Data from which to construct the template paths.
                  Dictionary of form: {<template name>: {<option>: <option value>}}
     :param keys: Available keys. Dictionary of form: {<key name> : <TemplateKey object>}
-    :param all_per_platform_roots: Root paths for all platforms. nested dictionary first keyed by 
+    :param all_per_platform_roots: Root paths for all platforms. nested dictionary first keyed by
                                    storage root name and then by sys.platform-style os name.
 
     :returns: Dictionary of form {<template name> : <TemplatePath object>}
@@ -844,13 +848,10 @@ def _process_templates_data(data, template_type):
 
     if dups_msg:
         raise TankError("It looks like you have one or more "
-                        "duplicate entries in your templates.yml file. Each template path that you " 
+                        "duplicate entries in your templates.yml file. Each template path that you "
                         "define in the templates.yml file needs to be unique, otherwise toolkit "
                         "will not be able to resolve which template a particular path on disk "
                         "corresponds to. The following duplicate "
-                        "templates were detected:\n %s" % dups_msg) 
+                        "templates were detected:\n %s" % dups_msg)
 
     return templates_data
-
-
-
