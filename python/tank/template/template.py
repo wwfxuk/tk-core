@@ -94,6 +94,7 @@ class Template(object):
                 'definition': var_definition,
                 'cleaned_definition': self._clean_definition(var_definition),
                 'static_tokens': self._calc_static_tokens(var_definition),
+                'expanded_definition': os.path.join(self._prefix, var_definition) if var_definition else self._prefix,
             }
 
     def __repr__(self):

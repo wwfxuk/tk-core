@@ -13,9 +13,11 @@ Parsing of template paths into values for specified keys using a list of static 
 from collections import namedtuple
 import logging
 import os
+import re
 
 from ..errors import TankError
 from ..log import LogManager
+from ..constants import TEMPLATE_KEY_NAME_REGEX
 
 """
 Container class used to store possible resolved values during template
@@ -31,6 +33,13 @@ resolved (a value was found for every remaining key)
                             or not
 :var last_error:            The last error reported from the template parsing for the current
                             branch of possible values.
+
+..code-block: python
+
+    >>> var_def = 'shots/{Sequence}/{Shot}/{Step}/work/{Shot}.{branch}.v{version}.{snapshot}.ma'
+    >>> re.split(r'\{[^\}]+\}', var_def)
+    ['shots/', '/', '/', '/work/', '.', '.v', '.', '.ma']
+    >>>
 """
 ResolvedValue = namedtuple(
     'ResolvedValue',
@@ -63,6 +72,38 @@ class ParsedPath(object):
         file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
         file_handler.setLevel(logging.INFO)
         self.logger.addHandler(file_handler)
+        self.logger.info('        key: %s\n        exp: %s\n        ork: %s\n        tok: %s',
+                         var_info["keys"],
+                         var_info["expanded_definition"],
+                         self.ordered_keys,
+                         self.static_tokens,
+                         )
+
+        regex = re.compile(r"{(?P<key_name>%s)}" % TEMPLATE_KEY_NAME_REGEX)
+        expanded_definition = var_info['expanded_definition']
+        found_keys = list(regex.finditer(expanded_definition))
+
+        self.full_resolve_length = len(found_keys)
+        self.parts = []
+        token_start = 0
+
+        for found in found_keys:
+            token_end = found.start()
+            token = found.string[token_start:token_end]
+            if token:
+                self.parts.append(token)
+
+            key_name = found.group('key_name')
+            template_key = var_info["keys"].get(key_name)
+            if template_key is not None:
+                self.parts.append(template_key)
+
+            token_start = found.end()
+
+        if token_start < len(expanded_definition):
+            self.parts.append(expanded_definition[token_start:])
+
+        self.logger.info('\n- '.join(['Parts found for: "%s"' % expanded_definition] + map(str, self.parts)))
         self.fields = self.parse_path()
 
     def _error(self, message, *message_args):
