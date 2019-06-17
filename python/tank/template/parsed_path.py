@@ -38,13 +38,13 @@ ResolvedValue = namedtuple(
 )
 
 
-class TemplatePathParser(object):
+class ParsedPath(object):
     """
     Class for parsing a path for a known set of keys, and known set of static
     tokens which should appear between the key values.
     """
 
-    def __init__(self, ordered_keys, static_tokens):
+    def __init__(self, input_path, var_info, skip_keys=None):
         """
         Construction
 
@@ -52,15 +52,18 @@ class TemplatePathParser(object):
                                 template definition.
         :param static_tokens:   Pieces of the definition that don't represent Template Keys.
         """
-        self.ordered_keys = ordered_keys
-        self.static_tokens = [token.lower() for token in static_tokens]
-        self.fields = {}
-        self.input_path = None
+        self.input_path = os.path.normpath(input_path)
+        self.ordered_keys = var_info['ordered_keys']
+        self.static_tokens = [token.lower() for token in var_info['static_tokens']]
+        self.fields = None
+        self.skip_keys = skip_keys or []
+        self.lower_path = None
         self.last_error = None
         self.logger = LogManager.get_logger(self.__class__.__name__)
         file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
         file_handler.setLevel(logging.INFO)
         self.logger.addHandler(file_handler)
+        self.fields = self.parse_path()
 
     def _error(self, message, *message_args):
         """Set ``last_error`` and record error on logger.
@@ -78,7 +81,7 @@ class TemplatePathParser(object):
         fields = None
 
         if self.static_tokens:
-            if self.input_path == self.static_tokens[0]:
+            if self.lower_path == self.static_tokens[0]:
                 # this is a template where there are no keys
                 # but where the static part of the template is matching
                 # the input path
@@ -87,7 +90,7 @@ class TemplatePathParser(object):
             else:
                 message = ("Template has no keys and first token (%s) "
                            "doesn't match the input path (%s)")
-                self._error(message, self.static_tokens[0], self.input_path)
+                self._error(message, self.static_tokens[0], self.lower_path)
                 fields = None
 
         return fields
@@ -111,7 +114,7 @@ class TemplatePathParser(object):
         :yields list[int]: Positions of index the token is found at.
         """
         start_pos = 0
-        max_index = len(self.input_path)
+        max_index = len(self.lower_path)
         token_positions = []
 
         for token in self.static_tokens:
@@ -119,7 +122,7 @@ class TemplatePathParser(object):
             token_pos = start_pos
 
             while token_pos >= 0:
-                token_pos = self.input_path.find(token, token_pos, max_index)
+                token_pos = self.lower_path.find(token, token_pos, max_index)
                 if token_pos >= 0:
                     if not positions:
                         # this is the first instance of this token we found so it
@@ -135,7 +138,7 @@ class TemplatePathParser(object):
                 self._error("Tried to extract fields but the path does not "
                             "fit the template:\n%s\n%s^--- Failed to find "
                             "token \"%s\" from here",
-                            self.input_path, " " * start_pos, token)
+                            self.lower_path, " " * start_pos, token)
                 break
 
         else:  # No break from: for token in self.static_tokens
@@ -153,7 +156,7 @@ class TemplatePathParser(object):
 
         return token_positions
 
-    def parse_path(self, input_path, skip_keys):
+    def parse_path(self):
         """
         Parses a path against the set of keys and static tokens to extract
         valid values for the keys.  This will make use of as much information
@@ -175,19 +178,14 @@ class TemplatePathParser(object):
         ambiguous and would resolve to either 'shot' or 'shot_010'
         which would error.
 
-        :param input_path:  The path to parse.
-        :param skip_keys:   List of keys for whom we do not need to find values.
-
         :returns:           If successful, a dictionary of field names mapped
                             to their values. None if fields can't be resolved.
         """
-        skip_keys = skip_keys or []
-        input_path = os.path.normpath(input_path)
         self.fields = {}
         self.last_error = None
 
         # all token comparisons are done case insensitively.
-        self.input_path = input_path.lower()
+        self.lower_path = self.input_path.lower()
 
         # if no keys, nothing to discover
         if not self.ordered_keys:
@@ -214,9 +212,9 @@ class TemplatePathParser(object):
             if (num_keys >= num_tokens - 1):
                 possible_values.extend(
                     self.__find_possible_key_values_recursive(
-                        input_path, len(self.static_tokens[0]),
+                        self.input_path, len(self.static_tokens[0]),
                         self.static_tokens[1:], token_positions[1:],
-                        self.ordered_keys, skip_keys))
+                        self.ordered_keys))
 
             # we've handled this case so remove the first position:
             token_positions[0] = token_positions[0][1:]
@@ -230,15 +228,15 @@ class TemplatePathParser(object):
             if (num_keys >= num_tokens):
                 possible_values.extend(
                     self.__find_possible_key_values_recursive(
-                        input_path, 0, self.static_tokens, token_positions,
-                        self.ordered_keys, skip_keys))
+                        self.input_path, 0, self.static_tokens, token_positions,
+                        self.ordered_keys))
 
         if not possible_values:
             # failed to find anything!
             if not self.last_error:
                 self.last_error = ("Tried to extract fields from path '%s', "
                                    "but the path does not fit the template." %
-                                   input_path)
+                                   self.input_path)
             return None
 
         # ensure that we only have a single set of valid values for all keys.  If we don't
@@ -298,7 +296,7 @@ class TemplatePathParser(object):
                         return None
 
             # if key isn't a skip key then add it to the self.fields dictionary:
-            if key_value is not None and key.name not in skip_keys:
+            if key_value is not None and key.name not in self.skip_keys:
                 self.fields[key.name] = key_value
 
         # ------------------------------>8-------------------------------------
@@ -312,7 +310,6 @@ class TemplatePathParser(object):
                                              tokens,
                                              token_positions,
                                              keys,
-                                             skip_keys,
                                              key_values=None):
         """
         Recursively traverse through the tokens & keys to find all possible values for the keys
@@ -325,7 +322,6 @@ class TemplatePathParser(object):
         :param token_positions: A list of lists containing all the valid positions where each static token
                                 can be found in the path
         :param keys:            A list of the remaining keys to find values for
-        :param skip_keys:       A list of keys that can be skipped from the result
         :param key_values:      A dictionary of all values that were previously found for any keys
 
         :returns:               A list of ResolvedValue instances representing the hierarchy of possible
@@ -357,7 +353,7 @@ class TemplatePathParser(object):
             # from this, find the possible value:
             possible_value = None
             last_error = None
-            if key.name in skip_keys:
+            if key.name in self.skip_keys:
                 # don't bother doing validation/conversion for this value as it's being skipped!
                 possible_value = possible_value_str
             else:
@@ -403,7 +399,7 @@ class TemplatePathParser(object):
                     # have keys remaining and some path left to process so recurse to next position for next key:
                     downstream_values = self.__find_possible_key_values_recursive(
                         path, token_position + len(token), tokens,
-                        token_positions, keys, skip_keys,
+                        token_positions, keys,
                         dict(key_values.items() +
                              [(key.name, possible_value_str)]))
 

@@ -17,7 +17,7 @@ from collections import OrderedDict
 import os
 import re
 
-from .template_path_parser import TemplatePathParser
+from .parsed_path import ParsedPath
 from ..errors import TankError
 from .. import constants
 
@@ -480,19 +480,17 @@ class Template(object):
         :returns: Values found in the path based on keys in template
         :rtype: Dictionary
         """
-        path_parser = None
+        path = None
         fields = None
 
         for var_info in self._variations.values():
-            ordered_keys = var_info['ordered_keys']
-            static_tokens = var_info['static_tokens']
-            path_parser = TemplatePathParser(ordered_keys, static_tokens)
-            fields = path_parser.parse_path(input_path, skip_keys)
+            path = ParsedPath(input_path, var_info, skip_keys=skip_keys)
+            fields = path.fields
             if fields is not None:
                 break
 
         if fields is None:
-            raise TankError("Template %s: %s" % (str(self), path_parser.last_error))
+            raise TankError("Template %s: %s" % (str(self), path.last_error))
 
         return fields
 
