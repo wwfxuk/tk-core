@@ -51,22 +51,94 @@ class TemplatePathParser(object):
         :param static_tokens:   Pieces of the definition that don't represent Template Keys.
         """
         self.ordered_keys = ordered_keys
-        self.static_tokens = static_tokens
+        self.static_tokens = [token.lower() for token in static_tokens]
         self.fields = {}
         self.input_path = None
-        self.last_error = "Unable to parse path"
+        self.last_error = None
         self.logger = LogManager.get_logger(self.__class__.__name__)
         file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
         file_handler.setLevel(logging.DEBUG)
         self.logger.addHandler(file_handler)
 
+    def _error(self, message, *message_args):
+        """Set ``last_error`` and record error on logger.
+
+        :param message: Message with C-style formatting tokens
+        :type message: str
+        :param message_args: Values to format message with
+        :type message_args: list
+        """
+        self.last_error = message % message_args
+        self.logger.error(message, *message_args)
+
+    def _empty_ordered_keys_fields(self):
+        # if no keys, nothing to discover
+        fields = None
+
+        if self.static_tokens:
+            if self.input_path == self.static_tokens[0]:
+                # this is a template where there are no keys
+                # but where the static part of the template is matching
+                # the input path
+                # (e.g. template: foo/bar - input path foo/bar)
+                fields = {}
+            else:
+                message = ("Template has no keys and first token (%s) "
+                           "doesn't match the input path (%s)")
+                self._error(message, self.static_tokens[0], self.input_path)
+                fields = None
+
+        return fields
+
+    def _iter_token_positions(self):
+        """Find all occurrences of all tokens in the path.
+
+
+        Possible token positions are split into domains where the first
+        occurrance of a token must be after the first occurrance of the
+        preceding token and the last occurrance must be before the last
+        occurrance of the following token.  e.g. The valid tokens for
+        the example path are shown below::
+
+            Template : {shot}_{name}_v{version}.ma
+            Path     : shot_010_name_v010.ma
+            Token _  :    [_   _]
+            Token _v :             [_v]
+            Token .ma:                  [.ma]
+
+        :yields list[int]: Positions of index the token is found at.
+        """
+        start_pos = 0
+        for token in self.static_tokens:
+            positions = []
+            token_pos = start_pos
+
+            while token_pos >= 0:
+                token_pos = self.input_path.find(token, token_pos)
+                if token_pos >= 0:
+                    if not positions:
+                        # this is the first instance of this token we found so it
+                        # will be the start position to look for the next token
+                        # as it will be the first possible location available!
+                        start_pos = token_pos + len(token)
+                    positions.append(token_pos)
+                    token_pos += len(token)
+
+            yield positions
+            if not positions:
+                self._error("Tried to extract fields but the path does not "
+                            "fit the template:\n%s\n%s^--- Failed to find "
+                            "token \"%s\" from here",
+                            self.input_path, " " * start_pos, token)
+                break
+
     def parse_path(self, input_path, skip_keys):
         """
-        Parses a path against the set of keys and static tokens to extract valid values
-        for the keys.  This will make use of as much information as it can within all
-        keys to correctly determine the value for a field and will detect if a key
-        resolves to ambiguous values where there is not enough information to resolve
-        correctly!
+        Parses a path against the set of keys and static tokens to extract
+        valid values for the keys.  This will make use of as much information
+        as it can within all keys to correctly determine the value for a field
+        and will detect if a key resolves to ambiguous values where there is
+        not enough information to resolve correctly!
 
         e.g. with the template:
 
@@ -76,77 +148,38 @@ class TemplatePathParser(object):
 
             shot_010_name_v001.ma
 
-        The algorithm would correctly determine that the value for the shot key is
-        'shot_010' assuming that the name key is restricted to be alphanumeric.  If
-        name allowed underscores then the shot key would be ambiguous and would resolve
-        to either 'shot' or 'shot_010' which would error.
+        The algorithm would correctly determine that the value for the shot key
+        is 'shot_010' assuming that the name key is restricted to be
+        alphanumeric. If name allowed underscores then the shot key would be
+        ambiguous and would resolve to either 'shot' or 'shot_010'
+        which would error.
 
         :param input_path:  The path to parse.
         :param skip_keys:   List of keys for whom we do not need to find values.
 
-        :returns:           If succesful, a dictionary of fields mapping key names to
-                            their values. None if the fields can't be resolved.
+        :returns:           If successful, a dictionary of field names mapped
+                            to their values. None if fields can't be resolved.
         """
         skip_keys = skip_keys or []
-        input_path = os.path.normpath(input_path)
+        self.fields = {}
+        self.last_error = None
 
         # all token comparisons are done case insensitively.
-        lower_path = input_path.lower()
+        self.input_path = os.path.normpath(input_path).lower()
 
         # if no keys, nothing to discover
         if not self.ordered_keys:
-            if lower_path == self.static_tokens[0]:
-                # this is a template where there are no keys
-                # but where the static part of the template is matching
-                # the input path
-                # (e.g. template: foo/bar - input path foo/bar)
-                return {}
-            else:
-                # template with no keys - in this case not matching
-                # the input path. Return for no match.
-                return None
+            self.fields = self._empty_ordered_keys_fields()
+            return self.fields
 
-        # find all occurances of all tokens in the path.  This will
-        # produce a list of lists, one list of positions for each token.
-        #
-        # Possible token positions are split into domains where the first
-        # occurance of a token must be after the first occurance of the
-        # preceding token and the last occurance must be before the last
-        # occurance of the following token.  e.g. The valid tokens for
-        # the example path are shown below:
-        #
-        # Template : {shot}_{name}_v{version}.ma
-        # Path     : shot_010_name_v010.ma
-        # Token _  :    [_   _]
-        # Token _v :             [_v]
-        # Token .ma:                  [.ma]
-        token_positions = []
-        start_pos = 0
-        for token in self.static_tokens:
-            positions = []
-            token_pos = start_pos
-
-            while token_pos >= 0:
-                token_pos = lower_path.find(token, token_pos)
-                if token_pos >= 0:
-                    if not positions:
-                        # this is the first instance of this token we found so it
-                        # will be the start position to look for the next token
-                        # as it will be the first possible location available!
-                        start_pos = token_pos + len(token)
-                    positions.append(token_pos)
-                    token_pos += len(token)
-            if not positions:
-                # didn't find token!
-                self.last_error = ("Tried to extract fields from path '%s', "
-                                   "but the path does not fit the template." %
-                                   input_path)
-                return None
-            token_positions.append(positions)
+        token_positions = list(self._iter_token_positions())
+        if not(token_positions and token_positions[-1]):
+            # didn't find all tokens!
+            return None
 
         # disgard positions that can't be valid - e.g. where the position is greater than the
         # last possible position of any subsequent tokens:
-        max_position = len(lower_path) + 1
+        max_position = len(self.input_path) + 1
         for ti in reversed(range(len(token_positions))):
             token_positions[ti] = [
                 p for p in token_positions[ti] if p < max_position
