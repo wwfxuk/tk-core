@@ -54,7 +54,7 @@ class ParsedPath(object):
     tokens which should appear between the key values.
     """
 
-    def __init__(self, input_path, var_info, skip_keys=None):
+    def __init__(self, input_path, variation, skip_keys=None):
         """
         Construction
 
@@ -63,10 +63,8 @@ class ParsedPath(object):
         :param static_tokens:   Pieces of the definition that don't represent Template Keys.
         """
         self.input_path = os.path.normpath(input_path)
-        self.named_keys = var_info['named_keys']
-        # self.ordered_keys = var_info['ordered_keys']
-        self.definition = var_info['expanded']
-        self.static_tokens = [token.lower() for token in var_info['static_tokens']]
+        self.named_keys = variation.named_keys
+        self.definition = variation.expanded
         self.skip_keys = skip_keys or []
 
         # all token comparisons are done case insensitively.
@@ -75,28 +73,12 @@ class ParsedPath(object):
         self.last_error = None
 
         self.logger = LogManager.get_logger(self.__class__.__name__)
-        file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
-        file_handler.setLevel(logging.INFO)
-        self.logger.addHandler(file_handler)
+        # file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
+        # file_handler.setLevel(logging.INFO)
+        # self.logger.addHandler(file_handler)
 
         self.parts = self._create_definition_parts()
         self.full_resolve_length = len(self.ordered_keys)
-
-        # static_tokens = [
-        #     part.lower()
-        #     for part in self.parts
-        #     if part and not isinstance(part, TemplateKey)
-        # ]
-        # static_tokens = [
-        #     part.lower()
-        #     for part in re.split(r"{%s}" % TEMPLATE_KEY_NAME_REGEX, self.definition.lower())
-        #     if part and not isinstance(part, TemplateKey)
-        # ]
-        # assert len(static_tokens) == len(self.static_tokens)
-        # for index, (our_token, self_token) in enumerate(zip(static_tokens, self.static_tokens)):
-        #     assert our_token == self_token, '[{}] "{}" != "{}"\n  Expanded: {}\nDefinition: {}\nours: {}\nself: {}'.format(
-        #         index, our_token, self_token, self.definition,
-        #         variation.fixed, static_tokens, self.static_tokens)
 
         # self.logger.info('        key: %s\n        exp: %s\n'
         #                  '        ork: %s\n        tok: %s',
@@ -121,13 +103,13 @@ class ParsedPath(object):
     def ordered_keys(self):
         return [part for part in self.parts if isinstance(part, TemplateKey)]
 
-    # @property
-    # def static_tokens(self):
-    #     return [
-    #         part.lower()
-    #         for part in self.parts
-    #         if not isinstance(part, TemplateKey)
-    #     ]
+    @property
+    def static_tokens(self):
+        return [
+            part.lower()
+            for part in self.parts
+            if not isinstance(part, TemplateKey)
+        ]
 
     def _resolve_path(self, input_path):
         """WIP and TESTING
