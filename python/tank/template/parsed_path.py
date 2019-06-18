@@ -18,6 +18,7 @@ import re
 from ..errors import TankError
 from ..log import LogManager
 from ..constants import TEMPLATE_KEY_NAME_REGEX
+from ..templatekey import TemplateKey
 
 """
 Container class used to store possible resolved values during template
@@ -62,49 +63,69 @@ class ParsedPath(object):
         :param static_tokens:   Pieces of the definition that don't represent Template Keys.
         """
         self.input_path = os.path.normpath(input_path)
+        self.named_keys = var_info['keys']
         self.ordered_keys = var_info['ordered_keys']
+        self.definition = var_info['expanded_definition']
         self.static_tokens = [token.lower() for token in var_info['static_tokens']]
-        self.fields = None
         self.skip_keys = skip_keys or []
-        self.lower_path = None
+
+        # all token comparisons are done case insensitively.
+        self.lower_path = self.input_path.lower()
+        self.fields = None
         self.last_error = None
+
         self.logger = LogManager.get_logger(self.__class__.__name__)
         file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
         file_handler.setLevel(logging.INFO)
         self.logger.addHandler(file_handler)
-        self.logger.info('        key: %s\n        exp: %s\n        ork: %s\n        tok: %s',
-                         var_info["keys"],
-                         var_info["expanded_definition"],
-                         self.ordered_keys,
-                         self.static_tokens,
-                         )
 
-        regex = re.compile(r"{(?P<key_name>%s)}" % TEMPLATE_KEY_NAME_REGEX)
-        expanded_definition = var_info['expanded_definition']
-        found_keys = list(regex.finditer(expanded_definition))
+        self.parts = self._create_definition_parts()
+        ordered_keys = [part for part in self.parts if isinstance(part, TemplateKey)]
+        self.full_resolve_length = len(ordered_keys)
 
-        self.full_resolve_length = len(found_keys)
-        self.parts = []
+        assert len(self.ordered_keys) == self.full_resolve_length
+        assert self.ordered_keys == ordered_keys
+
+        # self.logger.info('        key: %s\n        exp: %s\n'
+        #                  '        ork: %s\n        tok: %s',
+        #                  self.named_keys,
+        #                  self.definition,
+        #                  self.ordered_keys,
+        #                  self.static_tokens,
+        #                  )
+        # self.logger.info('\n- '.join(
+        #     ['Parts found for: "%s"' % self.definition] + map(str, self.parts)
+        # ))
+
+        self.fields = self.parse_path()
+
+    def _create_definition_parts(self):
+        """Create a list of tokens and keys for the expanded definition.
+
+        :return: Tokens and keys for the expanded definition.
+        :rtype: list
+        """
+        parts = []
         token_start = 0
+        regex = re.compile(r"{(?P<key_name>%s)}" % TEMPLATE_KEY_NAME_REGEX)
 
-        for found in found_keys:
+        for found in regex.finditer(self.definition):
             token_end = found.start()
             token = found.string[token_start:token_end]
             if token:
-                self.parts.append(token)
+                parts.append(token)
 
             key_name = found.group('key_name')
-            template_key = var_info["keys"].get(key_name)
+            template_key = self.named_keys.get(key_name)
             if template_key is not None:
-                self.parts.append(template_key)
+                parts.append(template_key)
 
             token_start = found.end()
 
-        if token_start < len(expanded_definition):
-            self.parts.append(expanded_definition[token_start:])
+        if token_start < len(self.definition):
+            parts.append(self.definition[token_start:])
 
-        self.logger.info('\n- '.join(['Parts found for: "%s"' % expanded_definition] + map(str, self.parts)))
-        self.fields = self.parse_path()
+        return parts
 
     def _error(self, message, *message_args):
         """Set ``last_error`` and record error on logger.
@@ -222,12 +243,6 @@ class ParsedPath(object):
         :returns:           If successful, a dictionary of field names mapped
                             to their values. None if fields can't be resolved.
         """
-        self.fields = {}
-        self.last_error = None
-
-        # all token comparisons are done case insensitively.
-        self.lower_path = self.input_path.lower()
-
         # if no keys, nothing to discover
         if not self.ordered_keys:
             self.fields = self._empty_ordered_keys_fields()
