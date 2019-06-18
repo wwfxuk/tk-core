@@ -83,19 +83,18 @@ class Template(object):
         # version for __repr__
         self._repr_def = self._fix_key_names(definition, keys)
 
-        variations = self._definition_variations(definition)
-        self._variations = OrderedDict()
-        for var_name in variations:
+        self._variations = []
+        for var_name in self._definition_variations(definition):
             var_keys, ordered_keys = self._keys_from_definition(var_name, name, keys)
             var_definition = self._fix_key_names(var_name, keys)
-            self._variations[var_name] = {
+            self._variations.append({
                 'named_keys': var_keys,
                 'ordered_keys': ordered_keys,
                 'fixed': var_definition,
                 'cleaned': self._clean_definition(var_definition),
                 'static_tokens': self._calc_static_tokens(var_definition),
                 'expanded': os.path.join(self._prefix, var_definition) if var_definition else self._prefix,
-            }
+            })
 
     def __repr__(self):
         class_name = self.__class__.__name__
@@ -110,8 +109,7 @@ class Template(object):
         The template as a string, e.g ``shots/{Shot}/{Step}/pub/{name}.v{version}.ma``
         """
         # Use first definition as it should be most inclusive in case of variations
-        first_variation = list(self._variations.values())[0]
-        return first_variation['fixed']
+        return self._variations[0]['fixed']
 
     @property
     def _static_tokens(self):
@@ -124,10 +122,7 @@ class Template(object):
         :return: List of static tokens lists from all variations.
         :rtype: list[list[str]]
         """
-        return [
-            var_info['static_tokens']
-            for var_info in self._variations.values()
-        ]
+        return [var_info['static_tokens'] for var_info in self._variations]
 
     @property
     def _keys(self):
@@ -140,7 +135,7 @@ class Template(object):
         :return: List of keys lists from all variations.
         :rtype: list[list[str]]
         """
-        return [var_info['named_keys'] for var_info in self._variations.values()]
+        return [var_info['named_keys'] for var_info in self._variations]
 
     @property
     def keys(self):
@@ -304,8 +299,7 @@ class Template(object):
             ignore_type = key_name in ignore_types
             processed_fields[key_name] = key.str_from_value(value, ignore_type=ignore_type)
 
-        variation = list(self._variations.values())[index]
-        return variation['cleaned'] % processed_fields
+        return self._variations[index]['cleaned'] % processed_fields
 
     def _definition_variations(self, definition):
         """
@@ -484,7 +478,7 @@ class Template(object):
         path = None
         fields = None
 
-        for var_info in self._variations.values():
+        for var_info in self._variations:
             path = ParsedPath(input_path, var_info, skip_keys=skip_keys)
             fields = path.fields
             if fields is not None:

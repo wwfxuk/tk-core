@@ -29,7 +29,7 @@ class TemplatePath(Template):
         self._per_platform_roots = per_platform_roots
 
         # Make definition use platform separator, re-calculate other attributes
-        for var_info in self._variations.values():
+        for var_info in self._variations:
             definition = os.path.join(*split_path(var_info['fixed']))
             var_info['fixed'] = definition
             var_info['cleaned'] = self._clean_definition(definition)
