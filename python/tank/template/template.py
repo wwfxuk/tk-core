@@ -89,12 +89,12 @@ class Template(object):
             var_keys, ordered_keys = self._keys_from_definition(var_name, name, keys)
             var_definition = self._fix_key_names(var_name, keys)
             self._variations[var_name] = {
-                'keys': var_keys,
+                'named_keys': var_keys,
                 'ordered_keys': ordered_keys,
-                'definition': var_definition,
-                'cleaned_definition': self._clean_definition(var_definition),
+                'fixed': var_definition,
+                'cleaned': self._clean_definition(var_definition),
                 'static_tokens': self._calc_static_tokens(var_definition),
-                'expanded_definition': os.path.join(self._prefix, var_definition) if var_definition else self._prefix,
+                'expanded': os.path.join(self._prefix, var_definition) if var_definition else self._prefix,
             }
 
     def __repr__(self):
@@ -111,7 +111,7 @@ class Template(object):
         """
         # Use first definition as it should be most inclusive in case of variations
         first_variation = list(self._variations.values())[0]
-        return first_variation['definition']
+        return first_variation['fixed']
 
     @property
     def _static_tokens(self):
@@ -140,7 +140,7 @@ class Template(object):
         :return: List of keys lists from all variations.
         :rtype: list[list[str]]
         """
-        return [var_info['keys'] for var_info in self._variations.values()]
+        return [var_info['named_keys'] for var_info in self._variations.values()]
 
     @property
     def keys(self):
@@ -305,7 +305,7 @@ class Template(object):
             processed_fields[key_name] = key.str_from_value(value, ignore_type=ignore_type)
 
         variation = list(self._variations.values())[index]
-        return variation['cleaned_definition'] % processed_fields
+        return variation['cleaned'] % processed_fields
 
     def _definition_variations(self, definition):
         """

@@ -30,9 +30,9 @@ class TemplatePath(Template):
 
         # Make definition use platform separator, re-calculate other attributes
         for var_info in self._variations.values():
-            definition = os.path.join(*split_path(var_info['definition']))
-            var_info['definition'] = definition
-            var_info['cleaned_definition'] = self._clean_definition(definition)
+            definition = os.path.join(*split_path(var_info['fixed']))
+            var_info['fixed'] = definition
+            var_info['cleaned'] = self._clean_definition(definition)
             var_info['static_tokens'] = self._calc_static_tokens(definition)
 
     @property

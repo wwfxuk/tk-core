@@ -63,9 +63,9 @@ class ParsedPath(object):
         :param static_tokens:   Pieces of the definition that don't represent Template Keys.
         """
         self.input_path = os.path.normpath(input_path)
-        self.named_keys = var_info['keys']
+        self.named_keys = var_info['named_keys']
         # self.ordered_keys = var_info['ordered_keys']
-        self.definition = var_info['expanded_definition']
+        self.definition = var_info['expanded']
         self.static_tokens = [token.lower() for token in var_info['static_tokens']]
         self.skip_keys = skip_keys or []
 
