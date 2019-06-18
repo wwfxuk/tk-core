@@ -19,7 +19,7 @@ import re
 
 from .parsed_path import ParsedPath
 from ..errors import TankError
-from .. import constants
+from ..constants import TEMPLATE_KEY_NAME_REGEX
 
 
 class Template(object):
@@ -42,7 +42,7 @@ class Template(object):
         names_keys = {}
         ordered_keys = []
         # regular expression to find key names
-        regex = r"(?<={)%s(?=})" % constants.TEMPLATE_KEY_NAME_REGEX
+        regex = r"(?<={)%s(?=})" % TEMPLATE_KEY_NAME_REGEX
         key_names = re.findall(regex, definition)
         for key_name in key_names:
             key = keys.get(key_name)
@@ -329,7 +329,7 @@ class Template(object):
                 continue
             if token.startswith('['):
                 # check that optional contains a key
-                if not re.search("{*%s}" % constants.TEMPLATE_KEY_NAME_REGEX, token):
+                if not re.search("{*%s}" % TEMPLATE_KEY_NAME_REGEX, token):
                     raise TankError("Optional sections must include a key definition.")
 
                 # Add definitions skipping this optional value
@@ -355,16 +355,16 @@ class Template(object):
         Substitutes key name for name used in definition
         """
         # Substitute key names for original key input names(key aliasing)
-        substitutions = [(key_name, key.name) for key_name, key in keys.items() if key_name != key.name]
-        for old_name, new_name in substitutions:
-            old_def = r"{%s}" % old_name
-            new_def = r"{%s}" % new_name
-            definition = re.sub(old_def, new_def, definition)
+        for old_name, key in keys.items():
+            if old_name != key.name:
+                old_def = r"{%s}" % old_name
+                new_def = r"{%s}" % key.name
+                definition = re.sub(old_def, new_def, definition)
         return definition
 
     def _clean_definition(self, definition):
         # Create definition with key names as strings with no format, enum or default values
-        regex = r"{(%s)}" % constants.TEMPLATE_KEY_NAME_REGEX
+        regex = r"{(%s)}" % TEMPLATE_KEY_NAME_REGEX
         cleaned_definition = re.sub(regex, "%(\g<1>)s", definition)
         return cleaned_definition
 
@@ -376,7 +376,7 @@ class Template(object):
         # case we just want to parse the prefix.  For example, in the case of a path template,
         # having an empty definition would result in expanding to the project/storage root
         expanded_definition = os.path.join(self._prefix, definition) if definition else self._prefix
-        regex = r"{%s}" % constants.TEMPLATE_KEY_NAME_REGEX
+        regex = r"{%s}" % TEMPLATE_KEY_NAME_REGEX
         tokens = re.split(regex, expanded_definition.lower())
         # Remove empty strings
         return [x for x in tokens if x]
