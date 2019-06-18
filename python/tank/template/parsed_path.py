@@ -93,11 +93,50 @@ class ParsedPath(object):
         #                  self.ordered_keys,
         #                  self.static_tokens,
         #                  )
-        # self.logger.info('\n- '.join(
-        #     ['Parts found for: "%s"' % self.definition] + map(str, self.parts)
-        # ))
+        parts_title = ['Parts found for: "%s"' % self.definition]
+        self.logger.info(
+            '---------------- "%s"\n%s',
+            self.input_path,
+            '\n- '.join(parts_title + map(str, self.parts))
+        )
 
+        # if self.parts:
+        #     resolve = self._resolve_path(self.lower_path)
+        #     for token in static_tokens:
         self.fields = self.parse_path()
+
+    def _resolve_path(self, input_path):
+        """WIP and TESTING
+        """
+        self.logger.info('input_path: "%s"', input_path)
+        part = self.parts.pop(0)
+        if isinstance(part, TemplateKey):
+            key_name = part.name
+            if key_name in self.skip_keys:
+                pass
+            else:
+                # get the actual value for this key - this will also validate the value:
+                try:
+                    self.logger.debug('Resolving "%s" using "%s"',
+                                      key_name, part)
+                    # possible_value = part.value_from_str(part)
+                except TankError as e:
+                    # it appears some locales are not able to correctly encode
+                    # the error message to str here, so use the %r form for the error
+                    # (ticket 24810)
+                    self._error("%s: Failed to get value for key '%s' - %r",
+                                self, key_name, e)
+                    # continue
+
+        else:  # Token
+            pattern = '^' + re.escape(part)
+            token_matched = re.search(pattern, input_path)
+            if token_matched:
+                trim_from_index = token_matched.end()
+                if trim_from_index < len(input_path) and self.parts:
+                    return self._resolve_path(input_path[trim_from_index:])
+            else:  # Token not matched, ERROR
+                self.last_error = part + 'Not matched'
 
     def _create_definition_parts(self):
         """Create a list of tokens and keys for the expanded definition.
@@ -181,18 +220,17 @@ class ParsedPath(object):
 
         for token in self.static_tokens:
             positions = []
-            token_pos = start_pos
+            previous_start = start_pos
 
-            while token_pos >= 0:
-                token_pos = self.lower_path.find(token, token_pos, max_index)
-                if token_pos >= 0:
+            for found in re.finditer(re.escape(token), self.lower_path):
+                token_pos = found.start()
+                if token_pos >= previous_start:
                     if not positions:
                         # this is the first instance of this token we found so it
                         # will be the start position to look for the next token
                         # as it will be the first possible location available!
-                        start_pos = token_pos + len(token)
+                        start_pos = found.end()
                     positions.append(token_pos)
-                    token_pos += len(token)
 
             if positions:
                 token_positions.append(positions)
@@ -260,7 +298,7 @@ class ParsedPath(object):
         num_keys = len(self.ordered_keys)
         num_tokens = len(self.static_tokens)
         possible_values = []
-        if token_positions[0][0] == 0:
+        if not isinstance(self.parts[0], TemplateKey):
             # path may start with the first static token - possible scenarios:
             #    t-k-t
             #    t-k-t-k
