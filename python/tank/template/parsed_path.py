@@ -54,7 +54,7 @@ class ParsedPath(object):
     tokens which should appear between the key values.
     """
 
-    def __init__(self, input_path, variation, skip_keys=None):
+    def __init__(self, input_path, variation, skip_keys=None, resolved_fields=None):
         """
         Construction
 
@@ -66,10 +66,11 @@ class ParsedPath(object):
         self.named_keys = variation.named_keys
         self.definition = variation.expanded
         self.skip_keys = skip_keys or []
+        self.downstream = []
 
         # all token comparisons are done case insensitively.
         self.lower_path = self.input_path.lower()
-        self.fields = None
+        self.fields = resolved_fields
         self.last_error = None
 
         self.logger = LogManager.get_logger(self.__class__.__name__)
@@ -303,7 +304,7 @@ class ParsedPath(object):
         # return a list of lists including all potential variations:
         num_keys = len(self.ordered_keys)
         num_tokens = len(self.static_tokens)
-        possible_values = []
+        self.downstream = []
         first_token_positions = token_positions[0]
         if not isinstance(self.parts[0], TemplateKey):
             # path may start with the first static token - possible scenarios:
@@ -311,7 +312,7 @@ class ParsedPath(object):
             #    t-k-t-k
             #    t-k-t-k-k
             if (num_keys >= num_tokens - 1):
-                possible_values.extend(
+                self.downstream.extend(
                     self.__find_possible_key_values_recursive(
                         self.input_path, len(self.static_tokens[0]),
                         self.static_tokens[1:], token_positions[1:],
@@ -327,12 +328,12 @@ class ParsedPath(object):
             #    k-t-k-t
             #    k-t-k-k
             if (num_keys >= num_tokens):
-                possible_values.extend(
+                self.downstream.extend(
                     self.__find_possible_key_values_recursive(
                         self.input_path, 0, self.static_tokens, token_positions,
                         self.ordered_keys))
 
-        if not possible_values:
+        if not self.downstream:
             # failed to find anything!
             if not self.last_error:
                 self.last_error = ("Tried to extract fields from path '%s', "
@@ -343,33 +344,33 @@ class ParsedPath(object):
         # ensure that we only have a single set of valid values for all keys.  If we don't
         # then attempt to report the best error we can
         from pprint import pformat
-        self.logger.debug(pformat(possible_values))
+        self.logger.debug(pformat(self.downstream))
         self.fields = {}
         for key in self.ordered_keys:
             key_value = None
-            if not possible_values:
+            if not self.downstream:
                 # we didn't find any possible values for this key!
                 break
-            elif len(possible_values) == 1:
-                if not possible_values[0].fully_resolved:
+            elif len(self.downstream) == 1:
+                if not self.downstream[0].fully_resolved:
                     # failed to fully resolve the path!
-                    self.last_error = possible_values[0].last_error
+                    self.last_error = self.downstream[0].last_error
                     return None
 
                 # only found one possible value!
-                key_value = possible_values[0].value
-                possible_values = possible_values[0].downstream_values
+                key_value = self.downstream[0].value
+                self.downstream = self.downstream[0].downstream_values
             else:
                 # found more than one possible value so check to see how many are fully resolved:
                 resolved_possible_values = [
-                    v for v in possible_values if v.fully_resolved
+                    v for v in self.downstream if v.fully_resolved
                 ]
                 num_resolved = len(resolved_possible_values)
 
                 if num_resolved == 1:
                     # only found one resolved value - awesome!
                     key_value = resolved_possible_values[0].value
-                    possible_values = resolved_possible_values[
+                    self.downstream = resolved_possible_values[
                         0].downstream_values
                 else:
                     if num_resolved > 1:
@@ -378,13 +379,13 @@ class ParsedPath(object):
                     else:
                         # didn't find any fully resolved values so we have multiple
                         # non-fully resolved values which also means the value is ambiguous!
-                        ambiguous_results = possible_values
+                        ambiguous_results = self.downstream
 
                     # Try get a solution from previously found result, if any
                     ambiguous_values = [v.value for v in ambiguous_results]
                     key_value = self.fields.get(key.name)
                     if key_value is not None and key_value in ambiguous_values:
-                        possible_values = ambiguous_results[
+                        self.downstream = ambiguous_results[
                             ambiguous_values.index(
                                 key_value)].downstream_values
                     else:
