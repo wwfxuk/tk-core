@@ -48,6 +48,22 @@ ResolvedValue = namedtuple(
 )
 
 
+def trimmed_indices(token_positions, amount):
+    """Subtract all indices in given token positions by a certain amount.
+
+    :param amount: Amount to subtract all indices by.
+    :type amount: int
+    :param token_positions: List of all token positions
+    :type token_positions: list[list[(int, int)]]
+    :return: New token positions with all indices trimmed.
+    :rtype: list[list[(int, int)]]
+    """
+    return [
+        [(start - amount, end - amount) for start, end in positions]
+        for positions in token_positions
+    ]
+
+
 class ParsedPath(object):
     """
     Class for parsing a path for a known set of keys, and known set of static
@@ -74,9 +90,9 @@ class ParsedPath(object):
         self.last_error = None
 
         self.logger = LogManager.get_logger(self.__class__.__name__)
-        file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
-        file_handler.setLevel(logging.DEBUG)
-        self.logger.addHandler(file_handler)
+        # file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
+        # file_handler.setLevel(logging.DEBUG)
+        # self.logger.addHandler(file_handler)
 
         self.parts = self._create_definition_parts()
         self.full_resolve_length = len(self.ordered_keys)
@@ -111,18 +127,11 @@ class ParsedPath(object):
                     #    t-k-t-k-k
                     if (num_keys >= num_tokens - 1):
                         token_start, token_end = first_token_positions[0]
-                        remaining_positions = []
-                        for positions in token_positions[1:]:
-                            remaining_positions.append([
-                                (start - token_end, end - token_end)
-                                for start, end in positions
-                            ])
-
                         result = self._get_resolved_values(
-                                self.input_path[token_end:],
-                                self.static_tokens[1:],
-                                remaining_positions,
-                                self.ordered_keys)
+                            self.input_path[token_end:],
+                            self.static_tokens[1:],
+                            trimmed_indices(token_positions[1:], token_end),
+                            self.ordered_keys)
                         self.downstream.extend(result)
 
                     # we've handled this case so remove the first position:
@@ -306,18 +315,11 @@ class ParsedPath(object):
                     # though - we just stop processing keys...
                     fully_resolved = True
                 else:
-                    remaining_positions = []
-                    for positions in token_positions[1:]:
-                        remaining_positions.append([
-                            (start - token_end, end - token_end)
-                            for start, end in positions
-                        ])
-
                     # have keys remaining and some path left to process so recurse to next position for next key:
                     downstream_values = self._get_resolved_values(
                         input_path[token_end:],
                         remaining_tokens,
-                        remaining_positions,
+                        trimmed_indices(token_positions[1:], token_end),
                         remaining_keys,
                         dict(key_values.items() + [(current_key.name, possible_value_str)]))
 
