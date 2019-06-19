@@ -95,10 +95,251 @@ class ParsedPath(object):
             '\n- '.join(parts_title + map(str, self.parts))
         )
 
-        # if self.parts:
-        #     resolve = self._resolve_path(self.lower_path)
-        #     for token in static_tokens:
-        self.fields = self.parse_path()
+        if self.ordered_keys:
+            token_positions = self._get_token_positions()
+            if token_positions and token_positions[-1]:
+                # find all possible values for keys based on token positions - this will
+                # return a list of lists including all potential variations:
+                num_keys = len(self.ordered_keys)
+                num_tokens = len(self.static_tokens)
+                self.downstream = []
+                first_token_positions = token_positions[0]
+                if not isinstance(self.parts[0], TemplateKey):
+                    # path may start with the first static token - possible scenarios:
+                    #    t-k-t
+                    #    t-k-t-k
+                    #    t-k-t-k-k
+                    if (num_keys >= num_tokens - 1):
+                        self.downstream.extend(
+                            self._get_resolved_values(
+                                len(self.parts[0]),
+                                self.static_tokens[1:],
+                                token_positions[1:],
+                                self.ordered_keys))
+
+                    # we've handled this case so remove the first position:
+                    first_token_positions = first_token_positions[1:]
+
+                if len(first_token_positions) > 0:
+                    # we still have non-zero positions for the first token so the
+                    # path may actually start with a key - possible scenarios:
+                    #    k-t-k
+                    #    k-t-k-t
+                    #    k-t-k-k
+                    if (num_keys >= num_tokens):
+                        self.downstream.extend(
+                            self._get_resolved_values(
+                                0,
+                                self.static_tokens,
+                                token_positions,
+                                self.ordered_keys))
+
+                if self.downstream:
+                    # ensure that we only have a single set of valid values for all keys.  If we don't
+                    # then attempt to report the best error we can
+                    from pprint import pformat
+                    self.logger.debug(pformat(self.downstream))
+                    self.fields = {}
+                    for key in self.ordered_keys:
+                        key_value = None
+                        if not self.downstream:
+                            # we didn't find any possible values for this key!
+                            break
+                        elif len(self.downstream) == 1:
+                            first_downstream = self.downstream[0]
+                            if not first_downstream.fully_resolved:
+                                # failed to fully resolve the path!
+                                self.last_error = first_downstream.last_error
+                                self.fields = None
+                                break
+
+                            # only found one possible value!
+                            key_value = first_downstream.value
+                            self.downstream = first_downstream.downstream_values
+                        else:
+                            # found more than one possible value so check to see how many are fully resolved:
+                            resolves = [v for v in self.downstream if v.fully_resolved]
+                            num_resolved = len(resolves)
+
+                            if num_resolved == 1:
+                                # only found one resolved value - awesome!
+                                key_value = resolves[0].value
+                                self.downstream = resolves[0].downstream_values
+                            else:
+                                if num_resolved > 1:
+                                    # found more than one valid value so value is ambiguous!
+                                    ambiguous_results = resolves
+                                else:
+                                    # didn't find any fully resolved values so we have multiple
+                                    # non-fully resolved values which also means the value is ambiguous!
+                                    ambiguous_results = self.downstream
+
+                                # Try get a solution from previously found result, if any
+                                ambiguous_values = [v.value for v in ambiguous_results]
+                                key_value = self.fields.get(key.name)
+                                if key_value is not None and key_value in ambiguous_values:
+                                    existing_index = ambiguous_values.index(key_value)
+                                    self.downstream = ambiguous_results[existing_index].downstream_values
+                                else:
+                                    self.logger.debug('key_value: %s', key_value)
+                                    self.logger.debug('ambiguous_values: %s', ambiguous_values)
+                                    self.logger.debug('self.fields: %s', self.fields)
+                                    self._error("Ambiguous values found for key '%s' could be any of: '%s'",
+                                                key.name, "', '".join(ambiguous_values))
+                                    self.fields = None
+                                    break
+
+                        # if key isn't a skip key then add it to the self.fields dictionary:
+                        if key_value is not None and key.name not in self.skip_keys:
+                            self.fields[key.name] = key_value
+                else:
+                    # failed to find anything!
+                    if not self.last_error:
+                        self._error("Tried to extract fields from path '%s', "
+                                    "but the path does not fit the template.",
+                                    self.input_path)
+                    self.fields = None
+
+            else:  # not(token_positions and token_positions[-1])
+                # didn't find all tokens!
+                self.fields = None
+
+        else:  # not(self.ordered_keys)
+            # if no keys, nothing to discover
+            self.fields = self._empty_ordered_keys_fields()
+
+    def _get_resolved_values(self,
+                             start_index,
+                             static_tokens,
+                             token_positions,
+                             ordered_keys,
+                             key_values=None):
+        """
+        Recursively traverse through the tokens & keys to find all possible values for the keys
+        given the available token positions im the path.
+
+        :param start_index:     The starting point in the path where we should look for a value
+                                for the next key
+        :param static_tokens:   A list of the remaining static tokens to look for
+        :param token_positions: A list of lists containing all the valid positions where each static token
+                                can be found in the path
+        :param ordered_keys:    A list of the remaining keys to find values for
+        :param key_values:      A dictionary of all values that were previously found for any keys
+
+        :returns:               A list of ResolvedValue instances representing the hierarchy of possible
+                                values for all keys being parsed.
+        """
+        input_path_length = len(self.input_path)
+        key_values = key_values or {}
+        current_key = ordered_keys[0]
+        remaining_keys = ordered_keys[1:]
+        remaining_tokens = static_tokens[1:]
+        current_positions = [(input_path_length, input_path_length)]
+        if token_positions:
+            current_positions = token_positions[0]
+        remaining_positions = token_positions[1:]
+
+        key_value = key_values.get(current_key.name)
+
+        # using the token positions, find all possible values for the key
+        possible_values = []
+        for token_start, token_end in current_positions:
+
+            # make sure that the length of the possible value substring will be valid:
+            if token_start <= start_index:
+                continue
+            if current_key.length is not None and token_start - start_index < current_key.length:
+                continue
+
+            # get the possible value substring:
+            possible_value_str = self.input_path[start_index:token_start]
+
+            # from this, find the possible value:
+            possible_value = None
+            last_error = None
+            if current_key.name in self.skip_keys:
+                # don't bother doing validation/conversion for this value as it's being skipped!
+                possible_value = possible_value_str
+            else:
+                # validate the value for this key:
+
+                # slashes are not allowed in key values!  Note, the possible value is a section
+                # of the input path so the OS specific path separator needs to be checked for:
+                if os.path.sep in possible_value_str:
+                    last_error = ("%s: Invalid value found for key %s: %s" %
+                                  (self, current_key.name, possible_value_str))
+                    continue
+
+                # can't have two different values for the same key:
+                if key_value and possible_value_str != key_value:
+                    last_error = (
+                        "%s: Conflicting values found for key %s: %s and %s" %
+                        (self, current_key.name, key_value, possible_value_str))
+                    continue
+
+                # get the actual value for this key - this will also validate the value:
+                try:
+                    self.logger.debug('Resolving "%s" using "%s"', current_key.name,
+                                      possible_value_str)
+                    possible_value = current_key.value_from_str(possible_value_str)
+                except TankError as e:
+                    # it appears some locales are not able to correctly encode
+                    # the error message to str here, so use the %r form for the error
+                    # (ticket 24810)
+                    last_error = ("%s: Failed to get value for key '%s' - %r" %
+                                  (self, current_key.name, e))
+                    continue
+
+            self.logger.debug('--> "%s"', possible_value)
+            downstream_values = []
+            fully_resolved = False
+            if remaining_keys:
+                # still have keys to process:
+                if token_end >= input_path_length:
+                    # but we've run out of path!  This is ok
+                    # though - we just stop processing keys...
+                    fully_resolved = True
+                else:
+                    # have keys remaining and some path left to process so recurse to next position for next key:
+                    downstream_values = self._get_resolved_values(
+                        token_end,
+                        remaining_tokens,
+                        remaining_positions,
+                        remaining_keys,
+                        dict(key_values.items() + [(current_key.name, possible_value_str)]))
+
+                    # check that at least one of the returned values is fully
+                    # resolved and find the last error found if any
+                    fully_resolved = False
+                    for v in downstream_values:
+                        self.logger.debug('Checking downstream: %s', v)
+                        if v.fully_resolved:
+                            fully_resolved = True
+                        if v.last_error:
+                            last_error = v.last_error
+                            self.logger.debug('x Found error: %s', last_error)
+
+            elif remaining_tokens:
+                # we don't have keys but we still have remaining tokens - this is bad!
+                fully_resolved = False
+                self.logger.debug('%d Tokens remain!', len(remaining_tokens))
+
+            elif token_end != input_path_length:
+                # no keys or tokens left but we haven't fully consumed the path either!
+                fully_resolved = False
+                self.logger.debug('Path not fully consumed: "%s"\nRemaining part of path: "%s"', self.input_path, self.input_path[token_end:])
+
+            else:
+                # processed all keys and tokens and fully consumed the path
+                fully_resolved = True
+
+            # keep track of the possible values:
+            self.logger.debug('{:-^80}'.format(fully_resolved))
+            possible_values.append(
+                ResolvedValue(possible_value, downstream_values,
+                              fully_resolved, last_error))
+
+        return possible_values
 
     @property
     def ordered_keys(self):
@@ -262,280 +503,3 @@ class ParsedPath(object):
                 max_index = max(new_positions) if new_positions else 0
 
         return token_positions
-
-    def parse_path(self):
-        """
-        Parses a path against the set of keys and static tokens to extract
-        valid values for the keys.  This will make use of as much information
-        as it can within all keys to correctly determine the value for a field
-        and will detect if a key resolves to ambiguous values where there is
-        not enough information to resolve correctly!
-
-        e.g. with the template:
-
-            {shot}_{name}_v{version}.ma
-
-        and a path:
-
-            shot_010_name_v001.ma
-
-        The algorithm would correctly determine that the value for the shot key
-        is 'shot_010' assuming that the name key is restricted to be
-        alphanumeric. If name allowed underscores then the shot key would be
-        ambiguous and would resolve to either 'shot' or 'shot_010'
-        which would error.
-
-        :returns:           If successful, a dictionary of field names mapped
-                            to their values. None if fields can't be resolved.
-        """
-        # if no keys, nothing to discover
-        if not self.ordered_keys:
-            self.fields = self._empty_ordered_keys_fields()
-            return self.fields
-
-        token_positions = self._get_token_positions()
-        if not(token_positions and token_positions[-1]):
-            # didn't find all tokens!
-            return None
-
-        # ------------------------------>8-------------------------------------
-
-        # find all possible values for keys based on token positions - this will
-        # return a list of lists including all potential variations:
-        num_keys = len(self.ordered_keys)
-        num_tokens = len(self.static_tokens)
-        self.downstream = []
-        first_token_positions = token_positions[0]
-        if not isinstance(self.parts[0], TemplateKey):
-            # path may start with the first static token - possible scenarios:
-            #    t-k-t
-            #    t-k-t-k
-            #    t-k-t-k-k
-            if (num_keys >= num_tokens - 1):
-                self.downstream.extend(
-                    self._get_resolved_values(
-                        len(self.parts[0]),
-                        self.static_tokens[1:],
-                        token_positions[1:],
-                        self.ordered_keys))
-
-            # we've handled this case so remove the first position:
-            first_token_positions = first_token_positions[1:]
-
-        if len(first_token_positions) > 0:
-            # we still have non-zero positions for the first token so the
-            # path may actually start with a key - possible scenarios:
-            #    k-t-k
-            #    k-t-k-t
-            #    k-t-k-k
-            if (num_keys >= num_tokens):
-                self.downstream.extend(
-                    self._get_resolved_values(
-                        0,
-                        self.static_tokens,
-                        token_positions,
-                        self.ordered_keys))
-
-        if not self.downstream:
-            # failed to find anything!
-            if not self.last_error:
-                self.last_error = ("Tried to extract fields from path '%s', "
-                                   "but the path does not fit the template." %
-                                   self.input_path)
-            return None
-
-        # ensure that we only have a single set of valid values for all keys.  If we don't
-        # then attempt to report the best error we can
-        from pprint import pformat
-        self.logger.debug(pformat(self.downstream))
-        self.fields = {}
-        for key in self.ordered_keys:
-            key_value = None
-            if not self.downstream:
-                # we didn't find any possible values for this key!
-                break
-            elif len(self.downstream) == 1:
-                first_downstream = self.downstream[0]
-                if not first_downstream.fully_resolved:
-                    # failed to fully resolve the path!
-                    self.last_error = first_downstream.last_error
-                    return None
-
-                # only found one possible value!
-                key_value = first_downstream.value
-                self.downstream = first_downstream.downstream_values
-            else:
-                # found more than one possible value so check to see how many are fully resolved:
-                resolves = [v for v in self.downstream if v.fully_resolved]
-                num_resolved = len(resolves)
-
-                if num_resolved == 1:
-                    # only found one resolved value - awesome!
-                    key_value = resolves[0].value
-                    self.downstream = resolves[0].downstream_values
-                else:
-                    if num_resolved > 1:
-                        # found more than one valid value so value is ambiguous!
-                        ambiguous_results = resolves
-                    else:
-                        # didn't find any fully resolved values so we have multiple
-                        # non-fully resolved values which also means the value is ambiguous!
-                        ambiguous_results = self.downstream
-
-                    # Try get a solution from previously found result, if any
-                    ambiguous_values = [v.value for v in ambiguous_results]
-                    key_value = self.fields.get(key.name)
-                    if key_value is not None and key_value in ambiguous_values:
-                        self.downstream = ambiguous_results[
-                            ambiguous_values.index(
-                                key_value)].downstream_values
-                    else:
-                        self.logger.debug('key_value: %s', key_value)
-                        self.logger.debug('ambiguous_values: %s', ambiguous_values)
-                        self.logger.debug('self.fields: %s', self.fields)
-                        self.last_error = (
-                            "Ambiguous values found for key '%s' could be any of: '%s'"
-                            % (key.name, "', '".join(ambiguous_values)))
-                        return None
-
-            # if key isn't a skip key then add it to the self.fields dictionary:
-            if key_value is not None and key.name not in self.skip_keys:
-                self.fields[key.name] = key_value
-
-        # ------------------------------>8-------------------------------------
-
-        # return the single unique set of self.fields:
-        return self.fields
-
-    def _get_resolved_values(self,
-                             start_index,
-                             static_tokens,
-                             token_positions,
-                             ordered_keys,
-                             key_values=None):
-        """
-        Recursively traverse through the tokens & keys to find all possible values for the keys
-        given the available token positions im the path.
-
-        :param start_index:     The starting point in the path where we should look for a value
-                                for the next key
-        :param static_tokens:   A list of the remaining static tokens to look for
-        :param token_positions: A list of lists containing all the valid positions where each static token
-                                can be found in the path
-        :param ordered_keys:    A list of the remaining keys to find values for
-        :param key_values:      A dictionary of all values that were previously found for any keys
-
-        :returns:               A list of ResolvedValue instances representing the hierarchy of possible
-                                values for all keys being parsed.
-        """
-        input_path_length = len(self.input_path)
-        key_values = key_values or {}
-        current_key = ordered_keys[0]
-        remaining_keys = ordered_keys[1:]
-        remaining_tokens = static_tokens[1:]
-        current_positions = [(input_path_length, input_path_length)]
-        if token_positions:
-            current_positions = token_positions[0]
-        remaining_positions = token_positions[1:]
-
-        key_value = key_values.get(current_key.name)
-
-        # using the token positions, find all possible values for the key
-        possible_values = []
-        for token_start, token_end in current_positions:
-
-            # make sure that the length of the possible value substring will be valid:
-            if token_start <= start_index:
-                continue
-            if current_key.length is not None and token_start - start_index < current_key.length:
-                continue
-
-            # get the possible value substring:
-            possible_value_str = self.input_path[start_index:token_start]
-
-            # from this, find the possible value:
-            possible_value = None
-            last_error = None
-            if current_key.name in self.skip_keys:
-                # don't bother doing validation/conversion for this value as it's being skipped!
-                possible_value = possible_value_str
-            else:
-                # validate the value for this key:
-
-                # slashes are not allowed in key values!  Note, the possible value is a section
-                # of the input path so the OS specific path separator needs to be checked for:
-                if os.path.sep in possible_value_str:
-                    last_error = ("%s: Invalid value found for key %s: %s" %
-                                  (self, current_key.name, possible_value_str))
-                    continue
-
-                # can't have two different values for the same key:
-                if key_value and possible_value_str != key_value:
-                    last_error = (
-                        "%s: Conflicting values found for key %s: %s and %s" %
-                        (self, current_key.name, key_value, possible_value_str))
-                    continue
-
-                # get the actual value for this key - this will also validate the value:
-                try:
-                    self.logger.debug('Resolving "%s" using "%s"', current_key.name,
-                                      possible_value_str)
-                    possible_value = current_key.value_from_str(possible_value_str)
-                except TankError as e:
-                    # it appears some locales are not able to correctly encode
-                    # the error message to str here, so use the %r form for the error
-                    # (ticket 24810)
-                    last_error = ("%s: Failed to get value for key '%s' - %r" %
-                                  (self, current_key.name, e))
-                    continue
-
-            self.logger.debug('--> "%s"', possible_value)
-            downstream_values = []
-            fully_resolved = False
-            if remaining_keys:
-                # still have keys to process:
-                if token_end >= input_path_length:
-                    # but we've run out of path!  This is ok
-                    # though - we just stop processing keys...
-                    fully_resolved = True
-                else:
-                    # have keys remaining and some path left to process so recurse to next position for next key:
-                    downstream_values = self._get_resolved_values(
-                        token_end,
-                        remaining_tokens,
-                        remaining_positions,
-                        remaining_keys,
-                        dict(key_values.items() + [(current_key.name, possible_value_str)]))
-
-                    # check that at least one of the returned values is fully
-                    # resolved and find the last error found if any
-                    fully_resolved = False
-                    for v in downstream_values:
-                        self.logger.debug('Checking downstream: %s', v)
-                        if v.fully_resolved:
-                            fully_resolved = True
-                        if v.last_error:
-                            last_error = v.last_error
-                            self.logger.debug('x Found error: %s', last_error)
-
-            elif remaining_tokens:
-                # we don't have keys but we still have remaining tokens - this is bad!
-                fully_resolved = False
-                self.logger.debug('%d Tokens remain!', len(remaining_tokens))
-
-            elif token_end != input_path_length:
-                # no keys or tokens left but we haven't fully consumed the path either!
-                fully_resolved = False
-                self.logger.debug('Path not fully consumed: "%s"\nRemaining part of path: "%s"', self.input_path, self.input_path[token_end:])
-
-            else:
-                # processed all keys and tokens and fully consumed the path
-                fully_resolved = True
-
-            # keep track of the possible values:
-            self.logger.debug('{:-^80}'.format(fully_resolved))
-            possible_values.append(
-                ResolvedValue(possible_value, downstream_values,
-                              fully_resolved, last_error))
-
-        return possible_values
