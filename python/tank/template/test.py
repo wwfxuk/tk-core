@@ -81,8 +81,7 @@ class ParsedPath(object):
         :param static_tokens:   Pieces of the definition that don't represent Template Keys.
         """
         self.input_path = os.path.normpath(input_path)
-        self.named_keys = variation.named_keys
-        self.definition = variation.expanded
+        self.variation = variation
         self.skip_keys = skip_keys or []
         self.downstream = []
 
@@ -407,21 +406,21 @@ class ParsedPath(object):
         token_start = 0
         regex = re.compile(r"{(?P<key_name>%s)}" % TEMPLATE_KEY_NAME_REGEX)
 
-        for found in regex.finditer(self.definition):
+        for found in regex.finditer(self.variation.expanded):
             token_end = found.start()
             token = found.string[token_start:token_end]
             if token:
                 parts.append(token.lower())  # Match our lowercase static tokens
 
             key_name = found.group('key_name')
-            template_key = self.named_keys.get(key_name)
+            template_key = self.variation.named_keys.get(key_name)
             if template_key is not None:
                 parts.append(template_key)
 
             token_start = found.end()
 
-        if token_start < len(self.definition):
-            parts.append(self.definition[token_start:])
+        if token_start < len(self.variation.expanded):
+            parts.append(self.variation.expanded[token_start:])
 
         return parts
 
