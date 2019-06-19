@@ -229,14 +229,14 @@ class ParsedPath(object):
             previous_start = start_pos
 
             for found in re.finditer(re.escape(token), self.lower_path):
-                token_pos = found.start()
-                if token_pos >= previous_start:
+                token_start = found.start()
+                if token_start >= previous_start:
                     if not positions:
                         # this is the first instance of this token we found so it
                         # will be the start position to look for the next token
                         # as it will be the first possible location available!
                         start_pos = found.end()
-                    positions.append(token_pos)
+                    positions.append(token_start)
 
             if positions:
                 token_positions.append(positions)
@@ -253,9 +253,9 @@ class ParsedPath(object):
             #      last possible position of any subsequent tokens
             for index in reversed(range(len(token_positions))):
                 new_positions = [
-                    position
-                    for position in token_positions[index]
-                    if position < max_index
+                    token_start
+                    for token_start in token_positions[index]
+                    if token_start < max_index
                 ]
                 token_positions[index] = new_positions
                 max_index = max(new_positions) if new_positions else 0
@@ -304,6 +304,7 @@ class ParsedPath(object):
         num_keys = len(self.ordered_keys)
         num_tokens = len(self.static_tokens)
         possible_values = []
+        first_token_positions = token_positions[0]
         if not isinstance(self.parts[0], TemplateKey):
             # path may start with the first static token - possible scenarios:
             #    t-k-t
@@ -317,9 +318,9 @@ class ParsedPath(object):
                         self.ordered_keys))
 
             # we've handled this case so remove the first position:
-            token_positions[0] = token_positions[0][1:]
+            first_token_positions = first_token_positions[1:]
 
-        if len(token_positions[0]) > 0:
+        if len(first_token_positions) > 0:
             # we still have non-zero positions for the first token so the
             # path may actually start with a key - possible scenarios:
             #    k-t-k
@@ -439,16 +440,16 @@ class ParsedPath(object):
 
         # using the token positions, find all possible values for the key
         possible_values = []
-        for token_position in positions:
+        for token_start in positions:
 
             # make sure that the length of the possible value substring will be valid:
-            if token_position <= key_position:
+            if token_start <= key_position:
                 continue
-            if key.length is not None and token_position - key_position < key.length:
+            if key.length is not None and token_start - key_position < key.length:
                 continue
 
             # get the possible value substring:
-            possible_value_str = path[key_position:token_position]
+            possible_value_str = path[key_position:token_start]
 
             # from this, find the possible value:
             possible_value = None
@@ -491,14 +492,14 @@ class ParsedPath(object):
             fully_resolved = False
             if keys:
                 # still have keys to process:
-                if token_position + len(token) >= len(path):
+                if token_start + len(token) >= len(path):
                     # but we've run out of path!  This is ok
                     # though - we just stop processing keys...
                     fully_resolved = True
                 else:
                     # have keys remaining and some path left to process so recurse to next position for next key:
                     downstream_values = self.__find_possible_key_values_recursive(
-                        path, token_position + len(token), tokens,
+                        path, token_start + len(token), tokens,
                         token_positions, keys,
                         dict(key_values.items() +
                              [(key.name, possible_value_str)]))
@@ -518,7 +519,7 @@ class ParsedPath(object):
                 # we don't have keys but we still have remaining tokens - this is bad!
                 fully_resolved = False
                 self.logger.debug('x Tokens remain')
-            elif token_position + len(token) != len(path):
+            elif token_start + len(token) != len(path):
                 # no keys or tokens left but we haven't fully consumed the path either!
                 fully_resolved = False
                 self.logger.debug('x Path not fully consumed')
