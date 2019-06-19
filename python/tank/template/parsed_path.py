@@ -355,30 +355,28 @@ class ParsedPath(object):
                 # we didn't find any possible values for this key!
                 break
             elif len(self.downstream) == 1:
-                if not self.downstream[0].fully_resolved:
+                first_downstream = self.downstream[0]
+                if not first_downstream.fully_resolved:
                     # failed to fully resolve the path!
-                    self.last_error = self.downstream[0].last_error
+                    self.last_error = first_downstream.last_error
                     return None
 
                 # only found one possible value!
-                key_value = self.downstream[0].value
-                self.downstream = self.downstream[0].downstream_values
+                key_value = first_downstream.value
+                self.downstream = first_downstream.downstream_values
             else:
                 # found more than one possible value so check to see how many are fully resolved:
-                resolved_possible_values = [
-                    v for v in self.downstream if v.fully_resolved
-                ]
-                num_resolved = len(resolved_possible_values)
+                resolves = [v for v in self.downstream if v.fully_resolved]
+                num_resolved = len(resolves)
 
                 if num_resolved == 1:
                     # only found one resolved value - awesome!
-                    key_value = resolved_possible_values[0].value
-                    self.downstream = resolved_possible_values[
-                        0].downstream_values
+                    key_value = resolves[0].value
+                    self.downstream = resolves[0].downstream_values
                 else:
                     if num_resolved > 1:
                         # found more than one valid value so value is ambiguous!
-                        ambiguous_results = resolved_possible_values
+                        ambiguous_results = resolves
                     else:
                         # didn't find any fully resolved values so we have multiple
                         # non-fully resolved values which also means the value is ambiguous!
@@ -410,32 +408,32 @@ class ParsedPath(object):
         return self.fields
 
     def __find_possible_key_values_recursive(self,
-                                             key_position,
-                                             tokens,
+                                             start_index,
+                                             static_tokens,
                                              token_positions,
-                                             keys,
+                                             ordered_keys,
                                              key_values=None):
         """
         Recursively traverse through the tokens & keys to find all possible values for the keys
         given the available token positions im the path.
 
-        :param path:            The path to find possible key values from
-        :param key_position:    The starting point in the path where we should look for a value
+        :param start_index:     The starting point in the path where we should look for a value
                                 for the next key
-        :param tokens:          A list of the remaining static tokens to look for
+        :param static_tokens:   A list of the remaining static tokens to look for
         :param token_positions: A list of lists containing all the valid positions where each static token
                                 can be found in the path
-        :param keys:            A list of the remaining keys to find values for
+        :param ordered_keys:    A list of the remaining keys to find values for
         :param key_values:      A dictionary of all values that were previously found for any keys
 
         :returns:               A list of ResolvedValue instances representing the hierarchy of possible
                                 values for all keys being parsed.
         """
+        input_path_length = len(self.input_path)
         key_values = key_values or {}
-        current_key = keys[0]
-        remaining_keys = keys[1:]
-        tokens = tokens[1:]
-        current_positions = [(len(self.input_path), len(self.input_path))]
+        current_key = ordered_keys[0]
+        remaining_keys = ordered_keys[1:]
+        remaining_tokens = static_tokens[1:]
+        current_positions = [(input_path_length, input_path_length)]
         if token_positions:
             current_positions = token_positions[0]
         remaining_positions = token_positions[1:]
@@ -447,13 +445,13 @@ class ParsedPath(object):
         for token_start, token_end in current_positions:
 
             # make sure that the length of the possible value substring will be valid:
-            if token_start <= key_position:
+            if token_start <= start_index:
                 continue
-            if current_key.length is not None and token_start - key_position < current_key.length:
+            if current_key.length is not None and token_start - start_index < current_key.length:
                 continue
 
             # get the possible value substring:
-            possible_value_str = self.input_path[key_position:token_start]
+            possible_value_str = self.input_path[start_index:token_start]
 
             # from this, find the possible value:
             possible_value = None
@@ -496,7 +494,7 @@ class ParsedPath(object):
             fully_resolved = False
             if remaining_keys:
                 # still have keys to process:
-                if token_end >= len(self.input_path):
+                if token_end >= input_path_length:
                     # but we've run out of path!  This is ok
                     # though - we just stop processing keys...
                     fully_resolved = True
@@ -504,7 +502,7 @@ class ParsedPath(object):
                     # have keys remaining and some path left to process so recurse to next position for next key:
                     downstream_values = self.__find_possible_key_values_recursive(
                         token_end,
-                        tokens,
+                        remaining_tokens,
                         remaining_positions,
                         remaining_keys,
                         dict(key_values.items() + [(current_key.name, possible_value_str)]))
@@ -520,14 +518,16 @@ class ParsedPath(object):
                             last_error = v.last_error
                             self.logger.debug('x Found error: %s', last_error)
 
-            elif tokens:
+            elif remaining_tokens:
                 # we don't have keys but we still have remaining tokens - this is bad!
                 fully_resolved = False
-                self.logger.debug('x Tokens remain')
-            elif token_end != len(self.input_path):
+                self.logger.debug('%d Tokens remain!', len(remaining_tokens))
+
+            elif token_end != input_path_length:
                 # no keys or tokens left but we haven't fully consumed the path either!
                 fully_resolved = False
-                self.logger.debug('x Path not fully consumed')
+                self.logger.debug('Path not fully consumed: "%s"\nRemaining part of path: "%s"', self.input_path, self.input_path[token_end:])
+
             else:
                 # processed all keys and tokens and fully consumed the path
                 fully_resolved = True
