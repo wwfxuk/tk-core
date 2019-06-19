@@ -29,38 +29,9 @@ class TemplatePath(Template):
         super(TemplatePath, self).__init__(definition, keys, name=name, prefix=root_path)
         self._per_platform_roots = per_platform_roots
 
-        # # Make definition use platform separator, re-calculate other attributes
+        # Make definition use platform separator
         for variation in self._variations:
             variation.fixed = os.path.join(*split_path(variation.fixed))
-
-            # variation['fixed'] = definition
-            # variation['cleaned'] = self._clean_definition(definition)
-            # variation['static_tokens'] = self._calc_static_tokens(definition)
-
-        # for var_def in self._definition_variations(definition):
-        #     var_keys, ordered_keys = self._keys_from_definition(var_def, name, keys)
-        #     var_definition = self._fix_key_names(var_def, keys)
-        #     var_info = {
-        #         'named_keys': var_keys,
-        #         'ordered_keys': ordered_keys,
-        #         'fixed': var_definition,
-        #         'cleaned': self._clean_definition(var_definition),
-        #         'static_tokens': self._calc_static_tokens(var_definition),
-        #         'expanded': os.path.join(self._prefix, var_definition) if var_definition else self._prefix,
-        #     }
-        #     definition = os.path.join(*split_path(var_info['fixed']))
-        #     var_info['fixed'] = definition
-        #     var_info['cleaned'] = self._clean_definition(definition)
-        #     var_info['static_tokens'] = self._calc_static_tokens(definition)
-        #     # self._variations.append(var_info)
-
-        #     variation = Variation(var_def, keys, template_name=name, prefix=root_path)
-        #     assert variation.named_keys == var_info['named_keys']
-        #     # assert variation.ordered_keys == var_info['ordered_keys']
-        #     # assert variation.fixed == var_info['fixed']
-        #     # assert variation.cleaned == var_info['cleaned']
-        #     # assert variation.static_tokens == var_info['static_tokens']
-        #     # assert variation.expanded == var_info['expanded']
 
     @property
     def root_path(self):

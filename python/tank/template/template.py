@@ -18,6 +18,7 @@ import os
 import re
 
 from .variation import Variation
+# from .test import ParsedPath
 from .parsed_path import ParsedPath
 from ..errors import TankError
 from ..constants import TEMPLATE_KEY_NAME_REGEX
@@ -470,6 +471,7 @@ class Template(object):
         """
         path = None
         fields = None
+        input_path = os.path.normpath(input_path)
 
         for variation in self._variations:
             path = ParsedPath(input_path, variation, skip_keys=skip_keys)

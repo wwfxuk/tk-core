@@ -159,7 +159,7 @@ class ParsedPath(object):
             token_end = found.start()
             token = found.string[token_start:token_end]
             if token:
-                parts.append(token)
+                parts.append(token.lower())  # Match our lowercase static tokens
 
             key_name = found.group('key_name')
             template_key = self.named_keys.get(key_name)
@@ -313,8 +313,8 @@ class ParsedPath(object):
             #    t-k-t-k-k
             if (num_keys >= num_tokens - 1):
                 self.downstream.extend(
-                    self.__find_possible_key_values_recursive(
-                        len(self.static_tokens[0]),
+                    self._get_resolved_values(
+                        len(self.parts[0]),
                         self.static_tokens[1:],
                         token_positions[1:],
                         self.ordered_keys))
@@ -330,7 +330,7 @@ class ParsedPath(object):
             #    k-t-k-k
             if (num_keys >= num_tokens):
                 self.downstream.extend(
-                    self.__find_possible_key_values_recursive(
+                    self._get_resolved_values(
                         0,
                         self.static_tokens,
                         token_positions,
@@ -407,12 +407,12 @@ class ParsedPath(object):
         # return the single unique set of self.fields:
         return self.fields
 
-    def __find_possible_key_values_recursive(self,
-                                             start_index,
-                                             static_tokens,
-                                             token_positions,
-                                             ordered_keys,
-                                             key_values=None):
+    def _get_resolved_values(self,
+                             start_index,
+                             static_tokens,
+                             token_positions,
+                             ordered_keys,
+                             key_values=None):
         """
         Recursively traverse through the tokens & keys to find all possible values for the keys
         given the available token positions im the path.
@@ -500,7 +500,7 @@ class ParsedPath(object):
                     fully_resolved = True
                 else:
                     # have keys remaining and some path left to process so recurse to next position for next key:
-                    downstream_values = self.__find_possible_key_values_recursive(
+                    downstream_values = self._get_resolved_values(
                         token_end,
                         remaining_tokens,
                         remaining_positions,
