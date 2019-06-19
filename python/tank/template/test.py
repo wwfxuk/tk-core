@@ -47,6 +47,11 @@ ResolvedValue = namedtuple(
     ['value', 'downstream_values', 'fully_resolved', 'last_error'],
 )
 
+class PathPart(object):
+    def __init__(self, part, possible_values):
+        self.part = part
+        self.possible_values = possible_values
+
 
 class ParsedPath(object):
     """
@@ -62,7 +67,7 @@ class ParsedPath(object):
                                 template definition.
         :param static_tokens:   Pieces of the definition that don't represent Template Keys.
         """
-        self.input_path = os.path.normpath(input_path)
+        self.input_path = input_path
         self.named_keys = variation.named_keys
         self.definition = variation.expanded
         self.skip_keys = skip_keys or []
@@ -74,26 +79,14 @@ class ParsedPath(object):
         self.last_error = None
 
         self.logger = LogManager.get_logger(self.__class__.__name__)
-        file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
-        file_handler.setLevel(logging.DEBUG)
-        self.logger.addHandler(file_handler)
+        # file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
+        # file_handler.setLevel(logging.INFO)
+        # self.logger.addHandler(file_handler)
 
         self.parts = self._create_definition_parts()
         self.full_resolve_length = len(self.ordered_keys)
 
-        # self.logger.info('        key: %s\n        exp: %s\n'
-        #                  '        ork: %s\n        tok: %s',
-        #                  self.named_keys,
-        #                  self.definition,
-        #                  self.ordered_keys,
-        #                  self.static_tokens,
-        #                  )
-        # parts_title = ['Parts found for: "%s"' % self.definition]
-        # self.logger.info(
-        #     '---------------- "%s"\n%s',
-        #     self.input_path,
-        #     '\n- '.join(parts_title + map(str, self.parts))
-        # )
+        self.fields = self.parse_path()
 
         if self.ordered_keys:
             token_positions = self._get_token_positions()
@@ -110,20 +103,12 @@ class ParsedPath(object):
                     #    t-k-t-k
                     #    t-k-t-k-k
                     if (num_keys >= num_tokens - 1):
-                        token_start, token_end = first_token_positions[0]
-                        remaining_positions = []
-                        for positions in token_positions[1:]:
-                            remaining_positions.append([
-                                (start - token_end, end - token_end)
-                                for start, end in positions
-                            ])
-
-                        result = self._get_resolved_values(
-                                self.input_path[token_end:],
+                        self.downstream.extend(
+                            self._get_resolved_values(
+                                len(self.parts[0]),
                                 self.static_tokens[1:],
-                                remaining_positions,
-                                self.ordered_keys)
-                        self.downstream.extend(result)
+                                token_positions[1:],
+                                self.ordered_keys))
 
                     # we've handled this case so remove the first position:
                     first_token_positions = first_token_positions[1:]
@@ -135,18 +120,18 @@ class ParsedPath(object):
                     #    k-t-k-t
                     #    k-t-k-k
                     if (num_keys >= num_tokens):
-                        result = self._get_resolved_values(
-                                self.input_path,
+                        self.downstream.extend(
+                            self._get_resolved_values(
+                                0,
                                 self.static_tokens,
                                 token_positions,
-                                self.ordered_keys)
-                        self.downstream.extend(result)
+                                self.ordered_keys))
 
                 if self.downstream:
                     # ensure that we only have a single set of valid values for all keys.  If we don't
                     # then attempt to report the best error we can
                     from pprint import pformat
-                    # self.logger.debug(pformat(self.downstream))
+                    self.logger.debug(pformat(self.downstream))
                     self.fields = {}
                     for key in self.ordered_keys:
                         key_value = None
@@ -215,139 +200,6 @@ class ParsedPath(object):
         else:  # not(self.ordered_keys)
             # if no keys, nothing to discover
             self.fields = self._empty_ordered_keys_fields()
-
-    def _get_resolved_values(self,
-                             input_path,
-                             static_tokens,
-                             token_positions,
-                             ordered_keys,
-                             key_values=None):
-        """
-        Recursively traverse through the tokens & keys to find all possible values for the keys
-        given the available token positions im the path.
-
-        :param input_path:      The starting point in the path where we should look for a value
-                                for the next key
-        :param static_tokens:   A list of the remaining static tokens to look for
-        :param token_positions: A list of lists containing all the valid positions where each static token
-                                can be found in the path
-        :param ordered_keys:    A list of the remaining keys to find values for
-        :param key_values:      A dictionary of all values that were previously found for any keys
-
-        :returns:               A list of ResolvedValue instances representing the hierarchy of possible
-                                values for all keys being parsed.
-        """
-        input_path_length = len(input_path)
-        key_values = key_values or {}
-        current_key = ordered_keys[0]
-        remaining_keys = ordered_keys[1:]
-        remaining_tokens = static_tokens[1:]
-        current_positions = [(input_path_length, input_path_length)]
-        if token_positions:
-            current_positions = token_positions[0]
-
-        key_value = key_values.get(current_key.name)
-
-        # using the token positions, find all possible values for the key
-        possible_values = []
-        # self.logger.debug('%s\n        input_path: %s %s', '-' * 100, input_path, current_positions)
-        for token_start, token_end in current_positions:
-
-            # make sure that the length of the possible value substring will be valid:
-            if token_start < 0:
-                continue
-            if current_key.length is not None and token_start < current_key.length:
-                continue
-
-            # get the possible value substring:
-            possible_value_str = input_path[:token_start]
-            # self.logger.debug('possible_value_str: %s [%d] <-- %s', possible_value_str, token_start, input_path)
-
-            # from this, find the possible value:
-            possible_value = None
-            last_error = None
-            if current_key.name in self.skip_keys:
-                # don't bother doing validation/conversion for this value as it's being skipped!
-                possible_value = possible_value_str
-            else:
-                # validate the value for this key:
-
-                # slashes are not allowed in key values!  Note, the possible value is a section
-                # of the input path so the OS specific path separator needs to be checked for:
-                if os.path.sep in possible_value_str:
-                    last_error = ("%s: Invalid value found for key %s: %s" %
-                                  (self, current_key.name, possible_value_str))
-                    continue
-
-                # can't have two different values for the same key:
-                if key_value and possible_value_str != key_value:
-                    last_error = (
-                        "%s: Conflicting values found for key %s: %s and %s" %
-                        (self, current_key.name, key_value, possible_value_str))
-                    continue
-
-                # get the actual value for this key - this will also validate the value:
-                try:
-                    possible_value = current_key.value_from_str(possible_value_str)
-                except TankError as e:
-                    # it appears some locales are not able to correctly encode
-                    # the error message to str here, so use the %r form for the error
-                    # (ticket 24810)
-                    last_error = ("%s: Failed to get value for key '%s' - %r" %
-                                  (self, current_key.name, e))
-                    continue
-
-            downstream_values = []
-            fully_resolved = False
-            if remaining_keys:
-                # still have keys to process:
-                if token_end >= input_path_length:
-                    # but we've run out of path!  This is ok
-                    # though - we just stop processing keys...
-                    fully_resolved = True
-                else:
-                    remaining_positions = []
-                    for positions in token_positions[1:]:
-                        remaining_positions.append([
-                            (start - token_end, end - token_end)
-                            for start, end in positions
-                        ])
-
-                    # have keys remaining and some path left to process so recurse to next position for next key:
-                    downstream_values = self._get_resolved_values(
-                        input_path[token_end:],
-                        remaining_tokens,
-                        remaining_positions,
-                        remaining_keys,
-                        dict(key_values.items() + [(current_key.name, possible_value_str)]))
-
-                    # check that at least one of the returned values is fully
-                    # resolved and find the last error found if any
-                    fully_resolved = False
-                    for v in downstream_values:
-                        if v.fully_resolved:
-                            fully_resolved = True
-                        if v.last_error:
-                            last_error = v.last_error
-
-            elif remaining_tokens:
-                # we don't have keys but we still have remaining tokens - this is bad!
-                fully_resolved = False
-
-            elif token_end != input_path_length:
-                # no keys or tokens left but we haven't fully consumed the path either!
-                fully_resolved = False
-
-            else:
-                # processed all keys and tokens and fully consumed the path
-                fully_resolved = True
-
-            # keep track of the possible values:
-            possible_values.append(
-                ResolvedValue(possible_value, downstream_values,
-                              fully_resolved, last_error))
-
-        return possible_values
 
     @property
     def ordered_keys(self):
@@ -511,3 +363,4 @@ class ParsedPath(object):
                 max_index = max(new_positions) if new_positions else 0
 
         return token_positions
+
