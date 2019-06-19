@@ -4,7 +4,7 @@ import os
 import re
 
 from ..errors import TankError
-from .. import constants
+from ..constants import TEMPLATE_KEY_NAME_REGEX
 
 
 class Variation(object):
@@ -21,14 +21,14 @@ class Variation(object):
         the :class:`TemplatePath` and :class:`TemplateString` classes.
 
         :param definition: Template definition variation.
-        :type definition: String
+        :type definition: str
         :param keys: Mapping of key names to keys.
-        :type keys: Dictionary
-        :param name: (Optional) name for parent template.
-        :type name: String
+        :type keys: dict[str, TemplateKey]
+        :param template_name: (Optional) name for parent template.
+        :type template_name: str
         :param prefix: (Optional) Internal use: prefix for calculating static
                        tokens and root paths.
-        :type prefix: String
+        :type prefix: str
         """
         self._original = None
         self._cleaned = None
@@ -37,6 +37,7 @@ class Variation(object):
         self._named_keys = None
         self._ordered_keys = None
         self._static_tokens = None
+        self._parts = []
 
         # Set up initial values first so downstream updates can trigger safely
         self._original = definition
@@ -53,7 +54,7 @@ class Variation(object):
         self._ordered_keys = []
 
         # regular expression to find key names
-        regex = r"(?<={)%s(?=})" % constants.TEMPLATE_KEY_NAME_REGEX
+        regex = r"(?<={)%s(?=})" % TEMPLATE_KEY_NAME_REGEX
         for key_name in re.findall(regex, self.original):
             key = self.keys.get(key_name)
             if key is None:
@@ -72,6 +73,10 @@ class Variation(object):
                     raise TankError(message.format(self.name, key.name))
                 self._named_keys[key.name] = key
                 self._ordered_keys.append(key)
+
+        # Downstream updates
+        if self.expanded:
+            self._repopulate_parts()
 
     def _update_fixed_definition(self):
         """
@@ -94,7 +99,7 @@ class Variation(object):
 
         Has key names as strings and no format, enum or default values
         """
-        regex = r"{(%s)}" % constants.TEMPLATE_KEY_NAME_REGEX
+        regex = r"{(%s)}" % TEMPLATE_KEY_NAME_REGEX
         self._cleaned = re.sub(regex, "%(\g<1>)s", self._fixed)
 
     def _update_expanded_definition(self):
@@ -108,6 +113,7 @@ class Variation(object):
 
         # Downstream updates
         self._update_static_tokens()
+        self._repopulate_parts()
 
     def _update_static_tokens(self):
         """
@@ -119,11 +125,42 @@ class Variation(object):
         For example, in the case of a path template, having an empty definition
         would result in expanding to the project/storage root.
         """
-        regex = r"{%s}" % constants.TEMPLATE_KEY_NAME_REGEX
+        regex = r"{%s}" % TEMPLATE_KEY_NAME_REGEX
         tokens = re.split(regex, self.expanded.lower())
 
         # Remove empty strings
         self._static_tokens = [token for token in tokens if token]
+
+    def _repopulate_parts(self):
+        """Create a list of tokens and keys for the expanded definition."""
+        self._parts = []
+        token_start = 0
+        regex = re.compile(r"{(?P<key_name>%s)}" % TEMPLATE_KEY_NAME_REGEX)
+
+        for found in regex.finditer(self.expanded):
+            token_end = found.start()
+            token = found.string[token_start:token_end]
+            if token:
+                self._parts.append(token)  # Match our lowercase static tokens
+
+            key_name = found.group('key_name')
+            template_key = self.named_keys.get(key_name)
+            if template_key is not None:
+                self._parts.append(template_key)
+
+            token_start = found.end()
+
+        if token_start < len(self.expanded):
+            self._parts.append(self.expanded[token_start:])
+
+    @property
+    def parts(self):
+        """Tokens and keys for the expanded definition.
+
+        :return: Tokens and keys for the expanded definition.
+        :rtype: list
+        """
+        return self._parts
 
     @property
     def named_keys(self):

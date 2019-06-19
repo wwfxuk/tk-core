@@ -95,7 +95,6 @@ class ParsedPath(object):
         # file_handler.setLevel(logging.DEBUG)
         # self.logger.addHandler(file_handler)
 
-        self.parts = self._create_definition_parts()
         self.full_resolve_length = len(self.ordered_keys)
 
         # self.logger.info('        key: %s\n        exp: %s\n'
@@ -121,7 +120,7 @@ class ParsedPath(object):
                 num_tokens = len(self.static_tokens)
 
                 first_token_positions = token_positions[0]
-                if not isinstance(self.parts[0], TemplateKey):
+                if not isinstance(self.variation.parts[0], TemplateKey):
                     # we're handling this case so remove the first position:
                     position = first_token_positions.pop(0)
 
@@ -291,8 +290,8 @@ class ParsedPath(object):
                 # can't have two different values for the same key:
                 if key_value and possible_value_str != key_value:
                     last_error = (
-                        "%s: Conflicting values found for key %s: %s and %s" %
-                        (self, current_key.name, key_value, possible_value_str))
+                            "%s: Conflicting values found for key %s: %s and %s" %
+                            (self, current_key.name, key_value, possible_value_str))
                     continue
 
                 # get the actual value for this key - this will also validate the value:
@@ -353,13 +352,13 @@ class ParsedPath(object):
 
     @property
     def ordered_keys(self):
-        return [part for part in self.parts if isinstance(part, TemplateKey)]
+        return [part for part in self.variation.parts if isinstance(part, TemplateKey)]
 
     @property
     def static_tokens(self):
         return [
             part.lower()
-            for part in self.parts
+            for part in self.variation.parts
             if not isinstance(part, TemplateKey)
         ]
 
@@ -367,7 +366,7 @@ class ParsedPath(object):
         """WIP and TESTING
         """
         self.logger.info('input_path: "%s"', input_path)
-        part = self.parts.pop(0)
+        part = self.variation.parts.pop(0)
         if isinstance(part, TemplateKey):
             key_name = part.name
             if key_name in self.skip_keys:
@@ -391,38 +390,10 @@ class ParsedPath(object):
             token_matched = re.search(pattern, input_path)
             if token_matched:
                 trim_from_index = token_matched.end()
-                if trim_from_index < len(input_path) and self.parts:
+                if trim_from_index < len(input_path) and self.variation.parts:
                     return self._resolve_path(input_path[trim_from_index:])
             else:  # Token not matched, ERROR
                 self.last_error = part + 'Not matched'
-
-    def _create_definition_parts(self):
-        """Create a list of tokens and keys for the expanded definition.
-
-        :return: Tokens and keys for the expanded definition.
-        :rtype: list
-        """
-        parts = []
-        token_start = 0
-        regex = re.compile(r"{(?P<key_name>%s)}" % TEMPLATE_KEY_NAME_REGEX)
-
-        for found in regex.finditer(self.variation.expanded):
-            token_end = found.start()
-            token = found.string[token_start:token_end]
-            if token:
-                parts.append(token.lower())  # Match our lowercase static tokens
-
-            key_name = found.group('key_name')
-            template_key = self.variation.named_keys.get(key_name)
-            if template_key is not None:
-                parts.append(template_key)
-
-            token_start = found.end()
-
-        if token_start < len(self.variation.expanded):
-            parts.append(self.variation.expanded[token_start:])
-
-        return parts
 
     def _error(self, message, *message_args):
         """Set ``last_error`` and record error on logger.
