@@ -229,14 +229,14 @@ class ParsedPath(object):
             previous_start = start_pos
 
             for found in re.finditer(re.escape(token), self.lower_path):
-                token_start = found.start()
+                token_start, token_end = found.span()
                 if token_start >= previous_start:
                     if not positions:
                         # this is the first instance of this token we found so it
                         # will be the start position to look for the next token
                         # as it will be the first possible location available!
-                        start_pos = found.end()
-                    positions.append(token_start)
+                        start_pos = token_end
+                    positions.append((token_start, token_end))
 
             if positions:
                 token_positions.append(positions)
@@ -253,8 +253,8 @@ class ParsedPath(object):
             #      last possible position of any subsequent tokens
             for index in reversed(range(len(token_positions))):
                 new_positions = [
-                    token_start
-                    for token_start in token_positions[index]
+                    (token_start, token_end)
+                    for token_start, token_end in token_positions[index]
                     if token_start < max_index
                 ]
                 token_positions[index] = new_positions
@@ -429,23 +429,24 @@ class ParsedPath(object):
                                 values for all keys being parsed.
         """
         key_values = key_values or {}
-        key = keys[0]
-        keys = keys[1:]
-        token = tokens[0] if tokens else ""
+        current_key = keys[0]
+        remaining_keys = keys[1:]
         tokens = tokens[1:]
-        positions = token_positions[0] if token_positions else [len(path)]
-        token_positions = token_positions[1:]
+        current_positions = [(len(path), len(path))]
+        if token_positions:
+            current_positions = token_positions[0]
+        remaining_positions = token_positions[1:]
 
-        key_value = key_values.get(key.name)
+        key_value = key_values.get(current_key.name)
 
         # using the token positions, find all possible values for the key
         possible_values = []
-        for token_start in positions:
+        for token_start, token_end in current_positions:
 
             # make sure that the length of the possible value substring will be valid:
             if token_start <= key_position:
                 continue
-            if key.length is not None and token_start - key_position < key.length:
+            if current_key.length is not None and token_start - key_position < current_key.length:
                 continue
 
             # get the possible value substring:
@@ -454,7 +455,7 @@ class ParsedPath(object):
             # from this, find the possible value:
             possible_value = None
             last_error = None
-            if key.name in self.skip_keys:
+            if current_key.name in self.skip_keys:
                 # don't bother doing validation/conversion for this value as it's being skipped!
                 possible_value = possible_value_str
             else:
@@ -464,45 +465,45 @@ class ParsedPath(object):
                 # of the input path so the OS specific path separator needs to be checked for:
                 if os.path.sep in possible_value_str:
                     last_error = ("%s: Invalid value found for key %s: %s" %
-                                  (self, key.name, possible_value_str))
+                                  (self, current_key.name, possible_value_str))
                     continue
 
                 # can't have two different values for the same key:
                 if key_value and possible_value_str != key_value:
                     last_error = (
                         "%s: Conflicting values found for key %s: %s and %s" %
-                        (self, key.name, key_value, possible_value_str))
+                        (self, current_key.name, key_value, possible_value_str))
                     continue
 
                 # get the actual value for this key - this will also validate the value:
                 try:
-                    self.logger.debug('Resolving "%s" using "%s"', key.name,
+                    self.logger.debug('Resolving "%s" using "%s"', current_key.name,
                                       possible_value_str)
-                    possible_value = key.value_from_str(possible_value_str)
+                    possible_value = current_key.value_from_str(possible_value_str)
                 except TankError as e:
                     # it appears some locales are not able to correctly encode
                     # the error message to str here, so use the %r form for the error
                     # (ticket 24810)
                     last_error = ("%s: Failed to get value for key '%s' - %r" %
-                                  (self, key.name, e))
+                                  (self, current_key.name, e))
                     continue
 
             self.logger.debug('--> "%s"', possible_value)
             downstream_values = []
             fully_resolved = False
-            if keys:
+            if remaining_keys:
                 # still have keys to process:
-                if token_start + len(token) >= len(path):
+                if token_end >= len(path):
                     # but we've run out of path!  This is ok
                     # though - we just stop processing keys...
                     fully_resolved = True
                 else:
                     # have keys remaining and some path left to process so recurse to next position for next key:
                     downstream_values = self.__find_possible_key_values_recursive(
-                        path, token_start + len(token), tokens,
-                        token_positions, keys,
+                        path, token_end, tokens,
+                        remaining_positions, remaining_keys,
                         dict(key_values.items() +
-                             [(key.name, possible_value_str)]))
+                             [(current_key.name, possible_value_str)]))
 
                     # check that at least one of the returned values is fully
                     # resolved and find the last error found if any
@@ -519,7 +520,7 @@ class ParsedPath(object):
                 # we don't have keys but we still have remaining tokens - this is bad!
                 fully_resolved = False
                 self.logger.debug('x Tokens remain')
-            elif token_start + len(token) != len(path):
+            elif token_end != len(path):
                 # no keys or tokens left but we haven't fully consumed the path either!
                 fully_resolved = False
                 self.logger.debug('x Path not fully consumed')
