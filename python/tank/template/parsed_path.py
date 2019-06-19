@@ -128,7 +128,9 @@ class ParsedPath(object):
                     #    t-k-t
                     #    t-k-t-k
                     #    t-k-t-k-k
-                    if (num_keys >= num_tokens - 1):
+                    if num_keys >= (num_tokens - 1):
+
+
                         self.downstream = self._get_resolved_values(
                             self.input_path[position.end:],
                             self.static_tokens[1:],
@@ -229,7 +231,7 @@ class ParsedPath(object):
                              static_tokens,
                              token_positions,
                              ordered_keys,
-                             key_values=None):
+                             resolved_fields=None):
         """
         Recursively traverse through the tokens & keys to find all possible values for the keys
         given the available token positions im the path.
@@ -240,13 +242,13 @@ class ParsedPath(object):
         :param token_positions: A list of lists containing all the valid positions where each static token
                                 can be found in the path
         :param ordered_keys:    A list of the remaining keys to find values for
-        :param key_values:      A dictionary of all values that were previously found for any keys
+        :param resolved_fields:      A dictionary of all values that were previously found for any keys
 
         :returns:               A list of ResolvedValue instances representing the hierarchy of possible
                                 values for all keys being parsed.
         """
         input_length = len(input_path)
-        key_values = key_values or {}
+        resolved_fields = resolved_fields or {}
         current_key = ordered_keys[0]
         remaining_keys = ordered_keys[1:]
         remaining_tokens = static_tokens[1:]
@@ -254,7 +256,7 @@ class ParsedPath(object):
         if token_positions:
             current_positions = token_positions[0]
 
-        key_value = key_values.get(current_key.name)
+        resolved_value = resolved_fields.get(current_key.name)
 
         # using the token positions, find all possible values for the key
         possible_values = []
@@ -288,10 +290,10 @@ class ParsedPath(object):
                     continue
 
                 # can't have two different values for the same key:
-                if key_value and possible_value_str != key_value:
+                if resolved_value and possible_value_str != resolved_value:
                     last_error = (
                             "%s: Conflicting values found for key %s: %s and %s" %
-                            (self, current_key.name, key_value, possible_value_str))
+                            (self, current_key.name, resolved_value, possible_value_str))
                     continue
 
                 # get the actual value for this key - this will also validate the value:
@@ -315,12 +317,16 @@ class ParsedPath(object):
                     fully_resolved = True
                 else:
                     # have keys remaining and some path left to process so recurse to next position for next key:
+                    results = list(resolved_fields.items())
+                    results += [(current_key.name, possible_value_str)]
+
                     downstream_values = self._get_resolved_values(
                         input_path[token_end:],
                         remaining_tokens,
                         trimmed_indices(token_positions[1:], token_end),
                         remaining_keys,
-                        dict(key_values.items() + [(current_key.name, possible_value_str)]))
+                        resolved_fields={key: value for key, value in results},
+                    )
 
                     # check that at least one of the returned values is fully
                     # resolved and find the last error found if any

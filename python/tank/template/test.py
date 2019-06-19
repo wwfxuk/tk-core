@@ -128,7 +128,9 @@ class ParsedPath(object):
                     #    t-k-t
                     #    t-k-t-k
                     #    t-k-t-k-k
-                    if (num_keys >= num_tokens - 1):
+                    if num_keys >= (num_tokens - 1):
+
+
                         self.downstream = self._get_resolved_values(
                             self.input_path[position.end:],
                             self.static_tokens[1:],
@@ -315,12 +317,16 @@ class ParsedPath(object):
                     fully_resolved = True
                 else:
                     # have keys remaining and some path left to process so recurse to next position for next key:
+                    results = list(key_value.items())
+                    results += [(current_key.name, possible_value_str)]
+                    
                     downstream_values = self._get_resolved_values(
                         input_path[token_end:],
                         remaining_tokens,
                         trimmed_indices(token_positions[1:], token_end),
                         remaining_keys,
-                        dict(key_values.items() + [(current_key.name, possible_value_str)]))
+                        key_values={key: value for key, value in results}
+                    )
 
                     # check that at least one of the returned values is fully
                     # resolved and find the last error found if any
