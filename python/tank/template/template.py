@@ -17,8 +17,6 @@ import os
 import re
 
 from .variation import Variation
-# from .test import ParsedPath
-from .parsed_fields import ParsedFields
 from .parsed_path import ParsedPath
 from ..errors import TankError
 from ..constants import TEMPLATE_KEY_NAME_REGEX
@@ -470,27 +468,13 @@ class Template(object):
         :returns: Values found in the path based on keys in template
         :rtype: Dictionary
         """
-        parsed_path = None
         parsed = None
-        fields = None
         input_path = os.path.normpath(input_path)
 
         for variation in self._variations:
-            parsed_path = ParsedPath(input_path, variation.parts, skip_keys=skip_keys)
+            parsed = ParsedPath(input_path, variation.parts, skip_keys=skip_keys)
+            if parsed:
+                return parsed.fields
 
-            parsed = ParsedFields(input_path, variation.parts, skip_keys=skip_keys)
-            fields = parsed.fields
-            ParsedPath(input_path, variation.parts, skip_keys=skip_keys)
-
-            assert not(parsed_path.fields != fields and bool(parsed_path))
-
-            if fields is not None:
-                assert bool(parsed_path)
-                break
-
-        if fields is None:
-            assert not bool(parsed_path)
-            assert parsed_path.last_error is not None
+        if parsed is not None:
             raise TankError("Template %s: %s" % (str(self), parsed.last_error))
-
-        return fields

@@ -1019,8 +1019,11 @@ class TestGetKeysSepInValue(TestTemplatePath):
         definition = "build/maya/{Asset}_{name}.ext"
         input_path = "build/maya/cat_man_doogle.ext"
         template = TemplatePath(definition, self.keys, "")          
-        expected_msg = ("Template %s: Ambiguous values found for key 'Asset' could be any of: 'cat', 'cat_man'" 
+        expected_msg = ("Template %s: Multiple possible solutions found for \"cat_man_doogle.ext\"\n"
+                        " - {'Asset': 'cat', 'name': 'man_doogle'}\n"
+                        " - {'Asset': 'cat_man', 'name': 'doogle'}"
                         % template)
+
         self.check_error_message(TankError, expected_msg, template.get_fields, input_path)        
         
     def test_ambiguous_begining(self):
@@ -1030,7 +1033,9 @@ class TestGetKeysSepInValue(TestTemplatePath):
         definition = "{Asset}_{name}/maya"
         input_path = "cat_man_doogle/maya"
         template = TemplatePath(definition, self.keys, "")          
-        expected_msg = ("Template %s: Ambiguous values found for key 'Asset' could be any of: 'cat', 'cat_man'" 
+        expected_msg = ("Template %s: Multiple possible solutions found for \"cat_man_doogle/maya\"\n"
+                        " - {'Asset': 'cat', 'name': 'man_doogle'}\n"
+                        " - {'Asset': 'cat_man', 'name': 'doogle'}"
                         % template)
         self.check_error_message(TankError, expected_msg, template.get_fields, input_path)        
 
@@ -1040,8 +1045,10 @@ class TestGetKeysSepInValue(TestTemplatePath):
         """
         definition = "build/maya/{Asset}_{name}"
         input_path = "build/maya/cat_man_doogle"
-        template = TemplatePath(definition, self.keys, "")          
-        expected_msg = ("Template %s: Ambiguous values found for key 'Asset' could be any of: 'cat', 'cat_man'"
+        template = TemplatePath(definition, self.keys, "")
+        expected_msg = ("Template %s: Multiple possible solutions found for \"cat_man_doogle\"\n"
+                        " - {'Asset': 'cat', 'name': 'man_doogle'}\n"
+                        " - {'Asset': 'cat_man', 'name': 'doogle'}"
                         % template)
         self.check_error_message(TankError, expected_msg, template.get_fields, input_path)
 
@@ -1052,9 +1059,13 @@ class TestGetKeysSepInValue(TestTemplatePath):
         self.keys["favorites"] = StringKey("favorites")
         definition = "build/{Asset}_{name}_{favorites}/maya"
         input_path = "build/cat_man_doogle_do_dandy_dod/maya"
-        template = TemplatePath(definition, self.keys, "")          
-        expected_msg = ("Template %s: Ambiguous values found for key 'Asset' could be any of: "
-                        "'cat', 'cat_man', 'cat_man_doogle', 'cat_man_doogle_do'" % template)
+        template = TemplatePath(definition, self.keys, "")
+        expected_msg = ("Template %s: Multiple possible solutions found for \"cat_man_doogle_do_dandy_dod/maya\"\n"
+                        " - {'Asset': 'cat'}\n"
+                        " - {'Asset': 'cat_man'}\n"
+                        " - {'Asset': 'cat_man_doogle'}\n"
+                        " - {'Asset': 'cat_man_doogle_do', 'favorites': 'dod', 'name': 'dandy'}"
+                        % template)
         self.check_error_message(TankError, expected_msg, template.get_fields, input_path)         
 
     def test_ambiguous_wrong_type(self):
@@ -1084,7 +1095,9 @@ class TestGetKeysSepInValue(TestTemplatePath):
         definition = "build/maya/{Asset}_{name_alpha}_{favorites}.ext"
         input_path = "build/maya/cat_man_doogle_fever.ext"
         template = TemplatePath(definition, self.keys, "")          
-        expected_msg = ("Template %s: Ambiguous values found for key 'Asset' could be any of: 'cat', 'cat_man'"
+        expected_msg = ("Template %s: Multiple possible solutions found for \"cat_man_doogle_fever.ext\"\n"
+                        " - {'name_alpha': 'man', 'Asset': 'cat', 'favorites': 'doogle_fever'}\n"
+                        " - {'name_alpha': 'doogle', 'Asset': 'cat_man', 'favorites': 'fever'}"
                         % template)
         self.check_error_message(TankError, expected_msg, template.get_fields, input_path)
         
