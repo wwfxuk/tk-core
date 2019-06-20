@@ -11,13 +11,11 @@
 Parsing of template paths into values for specified keys using a list of static tokens
 """
 from collections import namedtuple
-import logging
 import os
 import re
 
 from ..errors import TankError
 from ..log import LogManager
-from ..constants import TEMPLATE_KEY_NAME_REGEX
 from ..templatekey import TemplateKey
 
 """
@@ -72,16 +70,20 @@ class ParsedPath(object):
     tokens which should appear between the key values.
     """
 
-    def __init__(self, input_path, variation, skip_keys=None, resolved_fields=None):
-        """
-        Construction
+    def __init__(self, input_path, variation_parts, skip_keys=None, resolved_fields=None):
+        """Parse a given input path with tokens and keys provided.
 
-        :param ordered_keys:    Template key objects in order that they appear in the
-                                template definition.
-        :param static_tokens:   Pieces of the definition that don't represent Template Keys.
+        :param input_path: Path to parse.
+        :type input_path: str
+        :param variation_parts: Tokens and keys used to help parse the path.
+        :type variation_parts: list
+        :param skip_keys: Key names to skip parsing.
+        :type skip_keys: list[str]
+        :param resolved_fields: Internal use: Resolved key names and values.
+        :type resolved_fields: dict[str, str]
         """
         self.input_path = os.path.normpath(input_path)
-        self.variation = variation
+        self.parts = variation_parts
         self.skip_keys = skip_keys or []
         self.downstream = []
 
@@ -91,6 +93,7 @@ class ParsedPath(object):
         self.last_error = None
 
         self.logger = LogManager.get_logger(self.__class__.__name__)
+        # import logging
         # file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
         # file_handler.setLevel(logging.DEBUG)
         # self.logger.addHandler(file_handler)
@@ -120,7 +123,7 @@ class ParsedPath(object):
                 num_tokens = len(self.static_tokens)
 
                 first_token_positions = token_positions[0]
-                if not isinstance(self.variation.parts[0], TemplateKey):
+                if not isinstance(self.parts[0], TemplateKey):
                     # we're handling this case so remove the first position:
                     position = first_token_positions.pop(0)
 
@@ -129,7 +132,19 @@ class ParsedPath(object):
                     #    t-k-t-k
                     #    t-k-t-k-k
                     if num_keys >= (num_tokens - 1):
-
+                        # test_variation = Variation(
+                        #     self.variation.original,
+                        #     self.variation.keys,
+                        #     template_name=self.variation.name,
+                        #     prefix=self.variation.prefix,
+                        # )
+                        # test_path = ParsedPath(
+                        #     self.input_path[position.end:],
+                        #     test_variation,
+                        #     skip_keys=self.skip_keys,
+                        # )
+                        # self_st = self.static_tokens[1:]
+                        # assert len(self_st) == len(test_path.static_tokens)
 
                         self.downstream = self._get_resolved_values(
                             self.input_path[position.end:],
@@ -159,7 +174,6 @@ class ParsedPath(object):
                     # self.logger.debug(pformat(self.downstream))
                     self.fields = {}
                     for key in self.ordered_keys:
-                        key_value = None
                         if not self.downstream:
                             # we didn't find any possible values for this key!
                             break
@@ -274,7 +288,6 @@ class ParsedPath(object):
             # self.logger.debug('possible_value_str: %s [%d] <-- %s', possible_value_str, token_start, input_path)
 
             # from this, find the possible value:
-            possible_value = None
             last_error = None
             if current_key.name in self.skip_keys:
                 # don't bother doing validation/conversion for this value as it's being skipped!
@@ -285,26 +298,26 @@ class ParsedPath(object):
                 # slashes are not allowed in key values!  Note, the possible value is a section
                 # of the input path so the OS specific path separator needs to be checked for:
                 if os.path.sep in possible_value_str:
-                    last_error = ("%s: Invalid value found for key %s: %s" %
-                                  (self, current_key.name, possible_value_str))
+                    self._error("%s: Invalid value found for key %s: %s",
+                                self, current_key.name, possible_value_str)
                     continue
 
                 # can't have two different values for the same key:
                 if resolved_value and possible_value_str != resolved_value:
-                    last_error = (
-                            "%s: Conflicting values found for key %s: %s and %s" %
-                            (self, current_key.name, resolved_value, possible_value_str))
+                    self._error("%s: Conflicting values found for key %s: %s and %s",
+                                self, current_key.name,
+                                resolved_value, possible_value_str)
                     continue
 
                 # get the actual value for this key - this will also validate the value:
                 try:
                     possible_value = current_key.value_from_str(possible_value_str)
-                except TankError as e:
+                except TankError as error:
                     # it appears some locales are not able to correctly encode
                     # the error message to str here, so use the %r form for the error
                     # (ticket 24810)
-                    last_error = ("%s: Failed to get value for key '%s' - %r" %
-                                  (self, current_key.name, e))
+                    self._error("%s: Failed to get value for key '%s' - %r",
+                                self, current_key.name, error)
                     continue
 
             downstream_values = []
@@ -330,7 +343,6 @@ class ParsedPath(object):
 
                     # check that at least one of the returned values is fully
                     # resolved and find the last error found if any
-                    fully_resolved = False
                     for v in downstream_values:
                         if v.fully_resolved:
                             fully_resolved = True
@@ -358,21 +370,21 @@ class ParsedPath(object):
 
     @property
     def ordered_keys(self):
-        return [part for part in self.variation.parts if isinstance(part, TemplateKey)]
+        return [part for part in self.parts if isinstance(part, TemplateKey)]
 
     @property
     def static_tokens(self):
         return [
             part.lower()
-            for part in self.variation.parts
+            for part in self.parts
             if not isinstance(part, TemplateKey)
         ]
 
     def _resolve_path(self, input_path):
         """WIP and TESTING
-        """
+
         self.logger.info('input_path: "%s"', input_path)
-        part = self.variation.parts.pop(0)
+        part = self.parts.pop(0)
         if isinstance(part, TemplateKey):
             key_name = part.name
             if key_name in self.skip_keys:
@@ -396,10 +408,11 @@ class ParsedPath(object):
             token_matched = re.search(pattern, input_path)
             if token_matched:
                 trim_from_index = token_matched.end()
-                if trim_from_index < len(input_path) and self.variation.parts:
+                if trim_from_index < len(input_path) and self.parts:
                     return self._resolve_path(input_path[trim_from_index:])
             else:  # Token not matched, ERROR
                 self.last_error = part + 'Not matched'
+        """
 
     def _error(self, message, *message_args):
         """Set ``last_error`` and record error on logger.
@@ -407,7 +420,7 @@ class ParsedPath(object):
         :param message: Message with C-style formatting tokens
         :type message: str
         :param message_args: Values to format message with
-        :type message_args: list
+        :type message_args: object
         """
         self.last_error = message % message_args
         self.logger.error(message, *message_args)

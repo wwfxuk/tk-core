@@ -13,7 +13,6 @@ Management of file and directory templates.
 
 """
 
-from collections import OrderedDict
 import os
 import re
 
@@ -127,7 +126,7 @@ class Template(object):
         legacy/fallback sake.
 
         :return: List of keys lists from all variations.
-        :rtype: list[list[str]]
+        :rtype: list[dict[str]]
         """
         return [variation.named_keys for variation in self._variations]
 
@@ -273,6 +272,7 @@ class Template(object):
 
         # find largest key mapping without missing values
         keys = None
+        missing_keys = []
         # index of matching keys will be used to find cleaned_definition
         index = -1
         for index, cur_keys in enumerate(self._keys):
@@ -474,7 +474,7 @@ class Template(object):
         input_path = os.path.normpath(input_path)
 
         for variation in self._variations:
-            path = ParsedPath(input_path, variation, skip_keys=skip_keys)
+            path = ParsedPath(input_path, variation.parts, skip_keys=skip_keys)
             fields = path.fields
             if fields is not None:
                 break
