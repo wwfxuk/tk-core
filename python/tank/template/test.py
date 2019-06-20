@@ -11,13 +11,11 @@
 Parsing of template paths into values for specified keys using a list of static tokens
 """
 from collections import namedtuple
-import logging
 import os
 import re
 
 from ..errors import TankError
 from ..log import LogManager
-from ..constants import TEMPLATE_KEY_NAME_REGEX
 from ..templatekey import TemplateKey
 
 """
@@ -72,25 +70,30 @@ class ParsedPath(object):
     tokens which should appear between the key values.
     """
 
-    def __init__(self, input_path, variation, skip_keys=None, resolved_fields=None):
-        """
-        Construction
+    def __init__(self, input_path, variation_parts, skip_keys=None, resolved_fields=None):
+        """Parse a given input path with tokens and keys provided.
 
-        :param ordered_keys:    Template key objects in order that they appear in the
-                                template definition.
-        :param static_tokens:   Pieces of the definition that don't represent Template Keys.
+        :param input_path: Path to parse.
+        :type input_path: str
+        :param variation_parts: Tokens and keys used to help parse the path.
+        :type variation_parts: list
+        :param skip_keys: Key names to skip parsing.
+        :type skip_keys: list[str]
+        :param resolved_fields: Internal use: Resolved key names and values.
+        :type resolved_fields: dict[str, str]
         """
         self.input_path = os.path.normpath(input_path)
-        self.variation = variation
+        self.parts = variation_parts
         self.skip_keys = skip_keys or []
         self.downstream = []
 
         # all token comparisons are done case insensitively.
         self.lower_path = self.input_path.lower()
-        self.fields = resolved_fields
+        self.fields = resolved_fields or {}
         self.last_error = None
 
         self.logger = LogManager.get_logger(self.__class__.__name__)
+        # import logging
         # file_handler = logging.FileHandler('/home/joseph/repos/tk-core/var/parser.log')
         # file_handler.setLevel(logging.DEBUG)
         # self.logger.addHandler(file_handler)
@@ -120,7 +123,7 @@ class ParsedPath(object):
                 num_tokens = len(self.static_tokens)
 
                 first_token_positions = token_positions[0]
-                if not isinstance(self.variation.parts[0], TemplateKey):
+                if not isinstance(self.parts[0], TemplateKey):
                     # we're handling this case so remove the first position:
                     position = first_token_positions.pop(0)
 
@@ -129,7 +132,13 @@ class ParsedPath(object):
                     #    t-k-t-k
                     #    t-k-t-k-k
                     if num_keys >= (num_tokens - 1):
-
+                        test_path = ParsedPath(
+                            self.input_path[position.end:],
+                            self.parts[1:],
+                            skip_keys=self.skip_keys,
+                        )
+                        assert self.static_tokens[1:] == test_path.static_tokens
+                        assert trimmed_indices(token_positions[1:], position.end) == test_path._get_token_positions()
 
                         self.downstream = self._get_resolved_values(
                             self.input_path[position.end:],
@@ -159,7 +168,6 @@ class ParsedPath(object):
                     # self.logger.debug(pformat(self.downstream))
                     self.fields = {}
                     for key in self.ordered_keys:
-                        key_value = None
                         if not self.downstream:
                             # we didn't find any possible values for this key!
                             break
@@ -231,7 +239,7 @@ class ParsedPath(object):
                              static_tokens,
                              token_positions,
                              ordered_keys,
-                             key_values=None):
+                             resolved_fields=None):
         """
         Recursively traverse through the tokens & keys to find all possible values for the keys
         given the available token positions im the path.
@@ -242,13 +250,13 @@ class ParsedPath(object):
         :param token_positions: A list of lists containing all the valid positions where each static token
                                 can be found in the path
         :param ordered_keys:    A list of the remaining keys to find values for
-        :param key_values:      A dictionary of all values that were previously found for any keys
+        :param resolved_fields:      A dictionary of all values that were previously found for any keys
 
         :returns:               A list of ResolvedValue instances representing the hierarchy of possible
                                 values for all keys being parsed.
         """
         input_length = len(input_path)
-        key_values = key_values or {}
+        resolved_fields = resolved_fields or self.fields
         current_key = ordered_keys[0]
         remaining_keys = ordered_keys[1:]
         remaining_tokens = static_tokens[1:]
@@ -256,7 +264,7 @@ class ParsedPath(object):
         if token_positions:
             current_positions = token_positions[0]
 
-        key_value = key_values.get(current_key.name)
+        resolved_value = resolved_fields.get(current_key.name)
 
         # using the token positions, find all possible values for the key
         possible_values = []
@@ -274,7 +282,6 @@ class ParsedPath(object):
             # self.logger.debug('possible_value_str: %s [%d] <-- %s', possible_value_str, token_start, input_path)
 
             # from this, find the possible value:
-            possible_value = None
             last_error = None
             if current_key.name in self.skip_keys:
                 # don't bother doing validation/conversion for this value as it's being skipped!
@@ -285,26 +292,26 @@ class ParsedPath(object):
                 # slashes are not allowed in key values!  Note, the possible value is a section
                 # of the input path so the OS specific path separator needs to be checked for:
                 if os.path.sep in possible_value_str:
-                    last_error = ("%s: Invalid value found for key %s: %s" %
-                                  (self, current_key.name, possible_value_str))
+                    self._error("%s: Invalid value found for key %s: %s",
+                                self, current_key.name, possible_value_str)
                     continue
 
                 # can't have two different values for the same key:
-                if key_value and possible_value_str != key_value:
-                    last_error = (
-                            "%s: Conflicting values found for key %s: %s and %s" %
-                            (self, current_key.name, key_value, possible_value_str))
+                if resolved_value and possible_value_str != resolved_value:
+                    self._error("%s: Conflicting values found for key %s: %s and %s",
+                                self, current_key.name,
+                                resolved_value, possible_value_str)
                     continue
 
                 # get the actual value for this key - this will also validate the value:
                 try:
                     possible_value = current_key.value_from_str(possible_value_str)
-                except TankError as e:
+                except TankError as error:
                     # it appears some locales are not able to correctly encode
                     # the error message to str here, so use the %r form for the error
                     # (ticket 24810)
-                    last_error = ("%s: Failed to get value for key '%s' - %r" %
-                                  (self, current_key.name, e))
+                    self._error("%s: Failed to get value for key '%s' - %r",
+                                self, current_key.name, error)
                     continue
 
             downstream_values = []
@@ -317,20 +324,28 @@ class ParsedPath(object):
                     fully_resolved = True
                 else:
                     # have keys remaining and some path left to process so recurse to next position for next key:
-                    results = list(key_value.items())
+                    results = list(resolved_fields.items())
                     results += [(current_key.name, possible_value_str)]
-                    
+
+                    # test_path = ParsedPath(
+                    #     self.input_path[token_end:],
+                    #     self.parts[1:],
+                    #     skip_keys=self.skip_keys,
+                    #     resolved_fields={key: value for key, value in results},
+                    # )
+                    # assert remaining_tokens == test_path.static_tokens
+                    # assert trimmed_indices(token_positions[1:], token_end) == test_path._get_token_positions()
+
                     downstream_values = self._get_resolved_values(
                         input_path[token_end:],
                         remaining_tokens,
                         trimmed_indices(token_positions[1:], token_end),
                         remaining_keys,
-                        key_values={key: value for key, value in results}
+                        resolved_fields={key: value for key, value in results},
                     )
 
                     # check that at least one of the returned values is fully
                     # resolved and find the last error found if any
-                    fully_resolved = False
                     for v in downstream_values:
                         if v.fully_resolved:
                             fully_resolved = True
@@ -358,21 +373,26 @@ class ParsedPath(object):
 
     @property
     def ordered_keys(self):
-        return [part for part in self.variation.parts if isinstance(part, TemplateKey)]
+        return [part for part in self.parts if isinstance(part, TemplateKey)]
 
     @property
     def static_tokens(self):
         return [
             part.lower()
-            for part in self.variation.parts
+            for part in self.parts
             if not isinstance(part, TemplateKey)
         ]
 
-    def _resolve_path(self, input_path):
+    def _resolve_path(self,
+                      input_path,
+                      static_tokens,
+                      token_positions,
+                      ordered_keys,
+                      resolved_fields=None):
         """WIP and TESTING
-        """
+
         self.logger.info('input_path: "%s"', input_path)
-        part = self.variation.parts.pop(0)
+        part = self.parts.pop(0)
         if isinstance(part, TemplateKey):
             key_name = part.name
             if key_name in self.skip_keys:
@@ -396,10 +416,126 @@ class ParsedPath(object):
             token_matched = re.search(pattern, input_path)
             if token_matched:
                 trim_from_index = token_matched.end()
-                if trim_from_index < len(input_path) and self.variation.parts:
+                if trim_from_index < len(input_path) and self.parts:
                     return self._resolve_path(input_path[trim_from_index:])
             else:  # Token not matched, ERROR
                 self.last_error = part + 'Not matched'
+        """
+        input_length = len(input_path)
+        resolved_fields = resolved_fields or self.fields
+        current_key = ordered_keys[0]
+        remaining_keys = ordered_keys[1:]
+        remaining_tokens = static_tokens[1:]
+        current_positions = [TokenPosition(input_length, input_length)]
+        if token_positions:
+            current_positions = token_positions[0]
+
+        resolved_value = resolved_fields.get(current_key.name)
+
+        # using the token positions, find all possible values for the key
+        possible_values = []
+        # self.logger.debug('%s\n        input_path: %s %s', '-' * 100, input_path, current_positions)
+        for token_start, token_end in current_positions:
+
+            # make sure that the length of the possible value substring will be valid:
+            if token_start < 0:
+                continue
+            if current_key.length is not None and token_start < current_key.length:
+                continue
+
+            # get the possible value substring:
+            possible_value_str = input_path[:token_start]
+            # self.logger.debug('possible_value_str: %s [%d] <-- %s', possible_value_str, token_start, input_path)
+
+            # from this, find the possible value:
+            last_error = None
+            if current_key.name in self.skip_keys:
+                # don't bother doing validation/conversion for this value as it's being skipped!
+                possible_value = possible_value_str
+            else:
+                # validate the value for this key:
+
+                # slashes are not allowed in key values!  Note, the possible value is a section
+                # of the input path so the OS specific path separator needs to be checked for:
+                if os.path.sep in possible_value_str:
+                    self._error("%s: Invalid value found for key %s: %s",
+                                self, current_key.name, possible_value_str)
+                    continue
+
+                # can't have two different values for the same key:
+                if resolved_value and possible_value_str != resolved_value:
+                    self._error("%s: Conflicting values found for key %s: %s and %s",
+                                self, current_key.name,
+                                resolved_value, possible_value_str)
+                    continue
+
+                # get the actual value for this key - this will also validate the value:
+                try:
+                    possible_value = current_key.value_from_str(possible_value_str)
+                except TankError as error:
+                    # it appears some locales are not able to correctly encode
+                    # the error message to str here, so use the %r form for the error
+                    # (ticket 24810)
+                    self._error("%s: Failed to get value for key '%s' - %r",
+                                self, current_key.name, error)
+                    continue
+
+            downstream_values = []
+            fully_resolved = False
+            if remaining_keys:
+                # still have keys to process:
+                if token_end >= input_length:
+                    # but we've run out of path!  This is ok
+                    # though - we just stop processing keys...
+                    fully_resolved = True
+                else:
+                    # have keys remaining and some path left to process so recurse to next position for next key:
+                    results = list(resolved_fields.items())
+                    results += [(current_key.name, possible_value_str)]
+
+                    # test_path = ParsedPath(
+                    #     self.input_path[token_end:],
+                    #     self.parts[1:],
+                    #     skip_keys=self.skip_keys,
+                    #     resolved_fields={key: value for key, value in results},
+                    # )
+                    # assert remaining_tokens == test_path.static_tokens
+                    # assert trimmed_indices(token_positions[1:], token_end) == test_path._get_token_positions()
+
+                    downstream_values = self._get_resolved_values(
+                        input_path[token_end:],
+                        remaining_tokens,
+                        trimmed_indices(token_positions[1:], token_end),
+                        remaining_keys,
+                        resolved_fields={key: value for key, value in results},
+                    )
+
+                    # check that at least one of the returned values is fully
+                    # resolved and find the last error found if any
+                    for v in downstream_values:
+                        if v.fully_resolved:
+                            fully_resolved = True
+                        if v.last_error:
+                            last_error = v.last_error
+
+            elif remaining_tokens:
+                # we don't have keys but we still have remaining tokens - this is bad!
+                fully_resolved = False
+
+            elif token_end != input_length:
+                # no keys or tokens left but we haven't fully consumed the path either!
+                fully_resolved = False
+
+            else:
+                # processed all keys and tokens and fully consumed the path
+                fully_resolved = True
+
+            # keep track of the possible values:
+            possible_values.append(
+                ResolvedValue(possible_value, downstream_values,
+                              fully_resolved, last_error))
+
+        return possible_values
 
     def _error(self, message, *message_args):
         """Set ``last_error`` and record error on logger.
@@ -407,7 +543,7 @@ class ParsedPath(object):
         :param message: Message with C-style formatting tokens
         :type message: str
         :param message_args: Values to format message with
-        :type message_args: list
+        :type message_args: object
         """
         self.last_error = message % message_args
         self.logger.error(message, *message_args)
