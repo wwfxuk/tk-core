@@ -278,34 +278,33 @@ class ParsedFields(object):
                 continue
 
             # get the possible value substring:
-            possible_value_str = input_path[:token_start]
+            input_sub_str = input_path[:token_start]
             # self.logger.debug('possible_value_str: %s [%d] <-- %s', possible_value_str, token_start, input_path)
 
             # from this, find the possible value:
             last_error = None
             if current_key.name in self.skip_keys:
                 # don't bother doing validation/conversion for this value as it's being skipped!
-                possible_value = possible_value_str
-            else:
+                possible_value = input_sub_str
+            elif os.path.sep in input_sub_str:
                 # validate the value for this key:
 
                 # slashes are not allowed in key values!  Note, the possible value is a section
                 # of the input path so the OS specific path separator needs to be checked for:
-                if os.path.sep in possible_value_str:
                     self._error("%s: Invalid value found for key %s: %s",
-                                self, current_key.name, possible_value_str)
+                                self, current_key.name, input_sub_str)
                     continue
 
+            elif resolved_value and input_sub_str != resolved_value:
                 # can't have two different values for the same key:
-                if resolved_value and possible_value_str != resolved_value:
                     self._error("%s: Conflicting values found for key %s: %s and %s",
                                 self, current_key.name,
-                                resolved_value, possible_value_str)
+                                resolved_value, input_sub_str)
                     continue
-
-                # get the actual value for this key - this will also validate the value:
+            else:
                 try:
-                    possible_value = current_key.value_from_str(possible_value_str)
+                    # get the actual value for this key - this will also validate the value:
+                    possible_value = current_key.value_from_str(input_sub_str)
                 except TankError as error:
                     # it appears some locales are not able to correctly encode
                     # the error message to str here, so use the %r form for the error
@@ -325,7 +324,7 @@ class ParsedFields(object):
                 else:
                     # have keys remaining and some path left to process so recurse to next position for next key:
                     results = list(resolved_fields.items())
-                    results += [(current_key.name, possible_value_str)]
+                    results += [(current_key.name, input_sub_str)]
 
                     # test_path = ParsedFields(
                     #     self.input_path[token_end:],
@@ -617,12 +616,14 @@ class ParsedFields(object):
             # i.e. Where the position is greater than the
             #      last possible position of any subsequent tokens
             for index in reversed(range(len(token_positions))):
-                new_positions = [
-                    token_position
-                    for token_position in token_positions[index]
-                    if token_position.start < max_index
-                ]
+                new_positions = []
+                new_max = 0
+                for token_position in token_positions[index]:
+                    if token_position.start < max_index:
+                        new_positions.append(token_position)
+                        new_max = max(new_max, token_position.start)
+
                 token_positions[index] = new_positions
-                max_index = max(new_positions) if new_positions else 0
+                max_index = new_max
 
         return token_positions
