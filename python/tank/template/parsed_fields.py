@@ -64,7 +64,7 @@ def trimmed_indices(token_positions, amount):
     ]
 
 
-class ParsedPath(object):
+class ParsedFields(object):
     """
     Class for parsing a path for a known set of keys, and known set of static
     tokens which should appear between the key values.
@@ -132,7 +132,7 @@ class ParsedPath(object):
                     #    t-k-t-k
                     #    t-k-t-k-k
                     if num_keys >= (num_tokens - 1):
-                        test_path = ParsedPath(
+                        test_path = ParsedFields(
                             self.input_path[position.end:],
                             self.parts[1:],
                             skip_keys=self.skip_keys,
@@ -327,7 +327,7 @@ class ParsedPath(object):
                     results = list(resolved_fields.items())
                     results += [(current_key.name, possible_value_str)]
 
-                    # test_path = ParsedPath(
+                    # test_path = ParsedFields(
                     #     self.input_path[token_end:],
                     #     self.parts[1:],
                     #     skip_keys=self.skip_keys,
@@ -493,7 +493,7 @@ class ParsedPath(object):
                     results = list(resolved_fields.items())
                     results += [(current_key.name, possible_value_str)]
 
-                    # test_path = ParsedPath(
+                    # test_path = ParsedFields(
                     #     self.input_path[token_end:],
                     #     self.parts[1:],
                     #     skip_keys=self.skip_keys,
