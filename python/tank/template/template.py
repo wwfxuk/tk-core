@@ -469,7 +469,6 @@ class Template(object):
         :rtype: Dictionary
         """
         parsed = None
-        input_path = os.path.normpath(input_path)
 
         for variation in self._variations:
             parsed = ParsedPath(input_path, variation.parts, skip_keys=skip_keys)
