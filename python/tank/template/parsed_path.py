@@ -116,26 +116,7 @@ class ParsedPath(object):
         current_part = self.parts[0]
 
         if isinstance(current_part, TemplateKey):
-            key_length = current_part.length
-            next_token_positions = self._get_all_token_positions()[0]
-
-            for token_start, token_end in next_token_positions:
-                if key_length is not None and token_start < key_length:
-                    continue
-
-                input_sub_str = self.normal_path[:token_start]
-                possible_value = self._resolve_key(current_part, input_sub_str)
-                if possible_value is not None:
-                    possible_fields = self.fields.copy()
-                    possible_fields[current_part.name] = possible_value
-                    possible_path = ParsedPath(
-                        self.normal_path[token_end:],
-                        self.parts[2:],  # Start from next template key
-                        skip_keys=self.skip_keys,
-                        resolved_fields=possible_fields,
-                    )
-                    possibilities.append(possible_path)
-
+            possibilities.extend(self._resolve_key(current_part))
         else:
             current_lowercase = current_part.lower()
             if self.lower_path.startswith(current_lowercase):
@@ -174,54 +155,81 @@ class ParsedPath(object):
 
         return resolved_value
 
-    def _resolve_key(self, template_key, text):
+    def _resolve_key(self, template_key):
         """Resolve the template key value for a given input text.
 
         :param template_key: Template key to resolve value for.
         :type template_key: TemplateKey
-        :param text: Input text used to resolve template key with
-        :type text: str
         :return: Resolved template key value. None if failed/error.
         :rtype: str or None
         """
-        previous_resolve = self.fields.get(template_key.name)
-        resolved_value = None
+        key_possibilities = []
+        key_length = template_key.length
+        next_token_positions = self._get_all_token_positions()[0]
 
-        if template_key.name in self.skip_keys:
-            # don't bother doing validation/conversion for this value
-            # as it's being skipped!
-            resolved_value = text
+        for token_start, token_end in next_token_positions:
+            if key_length is not None and token_start < key_length:
+                continue
 
-        elif os.path.sep in text:
-            # Slashes are not allowed in key values!
-            # Note, the possible value is a section of the input path so the
-            # OS specific path separator needs to be checked for:
-            self._error("%s: Invalid value found for key %s: %s",
-                        self, template_key.name, text)
-        elif previous_resolve is not None:
-            previous_str = str(previous_resolve)
-            if text == previous_str:
-                # Use previous resolve since they are the same
-                resolved_value = previous_resolve
+            path_sub_str = self.normal_path[:token_start]
+            previous_resolve = self.fields.get(template_key.name)
+            possible_value = None
+            using_previous = False
+
+            if template_key.name in self.skip_keys:
+                # don't bother doing validation/conversion for this value
+                # as it's being skipped!
+                possible_value = path_sub_str
+
+            elif os.path.sep in path_sub_str:
+                # Slashes are not allowed in key values!
+                # Note, the possible value is a section of the input path so
+                # the OS specific path separator needs to be checked for:
+                self._error("%s: Invalid value found for key %s: %s",
+                            self, template_key.name, path_sub_str)
+
+            elif previous_resolve is not None:
+                previous_str = str(previous_resolve)
+                if path_sub_str == previous_str:
+                    # Use previous resolve since they are the same
+                    possible_value = previous_resolve
+                    using_previous = True
+                else:
+                    # Can't have two different values for the same key:
+                    self._error("%s: Conflicting values found for key %s: "
+                                "%s and %s",
+                                self, template_key.name,
+                                previous_resolve, path_sub_str)
             else:
-                # Can't have two different values for the same key:
-                self._error("%s: Conflicting values found for key %s: "
-                            "%s and %s",
-                            self, template_key.name,
-                            previous_resolve, text)
-        else:
-            # Get the actual value for this key.
-            # This will also validate the value:
-            try:
-                resolved_value = template_key.value_from_str(text)
-            except TankError as error:
-                # It appears some locales are not able to correctly encode
-                # the error message to str here, so use the %r form for
-                # the error (ticket 24810)
-                self._error("%s: Failed to get value for key '%s' - %r",
-                            self, template_key.name, error)
+                # Get the actual value for this key.
+                # This will also validate the value:
+                try:
+                    possible_value = template_key.value_from_str(path_sub_str)
+                except TankError as error:
+                    # It appears some locales are not able to correctly encode
+                    # the error message to str here, so use the %r form for
+                    # the error (ticket 24810)
+                    self._error("%s: Failed to get value for key '%s' - %r",
+                                self, template_key.name, error)
 
-        return resolved_value
+            if possible_value is not None:
+                possible_fields = self.fields.copy()
+                possible_fields[template_key.name] = possible_value
+                possible_path = ParsedPath(
+                    self.normal_path[token_end:],
+                    self.parts[2:],  # Start from next template key
+                    skip_keys=self.skip_keys,
+                    resolved_fields=possible_fields,
+
+                )
+                if using_previous:
+                    key_possibilities = [possible_path]
+                    break
+                else:
+                    key_possibilities.append(possible_path)
+
+        return key_possibilities
+
 
     def _error(self, message, *message_args):
         """Set ``last_error`` and record error on logger.
