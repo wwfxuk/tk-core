@@ -993,7 +993,7 @@ class TestGetKeysSepInValue(TestTemplatePath):
                     "name": "doogle"}
         self.assert_path_matches(definition, input_path, expected)
 
-    def test_enum_ambigous(self):
+    def test_enum_ambiguous(self):
         key = StringKey("Asset", choices=["cat_man", "dog_man"])
         self.keys["Asset"] = key
         definition = "build/maya/{Asset}_{name}.ext"
@@ -1080,14 +1080,14 @@ class TestGetKeysSepInValue(TestTemplatePath):
                     "ext": "jpeg"}
         self.assert_path_matches(definition, input_path, expected)
 
-    def test_ambigous_alphanum_first(self):
+    def test_ambiguous_alphanum_first(self):
         definition = "build/maya/{name_alpha}_{Asset}.ext"
         input_path = "build/maya/doogle_cat_man_fever.ext"
         expected = {"Asset": "cat_man_fever",
                     "name_alpha": "doogle"}
         self.assert_path_matches(definition, input_path, expected)
 
-    def test_ambigous_alphanum_middle(self):
+    def test_ambiguous_alphanum_middle(self):
         """
         Can't resolve if values are too ambiguous
         """        
@@ -1101,7 +1101,7 @@ class TestGetKeysSepInValue(TestTemplatePath):
                         % template)
         self.check_error_message(TankError, expected_msg, template.get_fields, input_path)
         
-    def test_ambigous_alphanum_after(self):
+    def test_ambiguous_alphanum_after(self):
         definition = "build/maya/{Asset}_{name_alpha}.ext"
         input_path = "build/maya/cat_man_fever_doogle.ext"
         expected = {"Asset": "cat_man_fever",

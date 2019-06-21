@@ -43,6 +43,8 @@ resolved (a value was found for every remaining key)
 
 TokenPosition = namedtuple('TokenPosition', ['start', 'end'])
 
+KeySolution = namedtuple('KeySolution', ['key_name', 'value', 'remaining_path'])
+
 
 class ParsedPath(object):
     """
@@ -81,8 +83,10 @@ class ParsedPath(object):
                 self.possibilities = self._generate_possibilities()
                 self.fully_resolved = self._resolve_possibilities()
             else:
-                self._error('Path still remains (after parsing): "%s"',
-                            self.input_path)
+                self._error(
+                    'Path still remains (after parsing): "%s"',
+                    self.input_path,
+                )
 
     def _resolve_possibilities(self):
         resolved_paths = [
@@ -128,9 +132,11 @@ class ParsedPath(object):
                 )
                 possibilities.append(possible_path)
             else:
-                self._error("Template has no keys and first token (%s) "
-                            "doesn't match the input path (%s)",
-                            current_lowercase, self.lower_path)
+                message = (
+                    "Template has no keys and first token (%s) "
+                    "doesn't match the input path (%s)"
+                )
+                self._error(message, current_lowercase, self.lower_path)
 
         return possibilities
 
@@ -158,13 +164,43 @@ class ParsedPath(object):
     def _resolve_key(self, template_key):
         """Resolve the template key value for a given input text.
 
+        These conditions are checked in the following order:
+
+        1. If key is being skipped, don't bother doing validation/conversion
+           for the substring's value.
+
+        2. Slashes (path separators) are not allowed in key values!
+
+           .. note::
+                The possible value is a section of the input path, so
+                the OS specific path separator needs to be checked for
+
+        3. If key has already been resolved, i.e. previous value exists in
+           :attr:`fields`:
+
+           a) If substring matches (``str()`` of) previous value, then
+              the substring will be used as the **only possible solution**
+              for this key at this part of the input path.
+           b) If it **does not match**, then log an error for values
+              not matching previous resolve.
+
+        4. Check if :func:`TemplateKey.value_from_str()` successfully
+           parses the substring into a valid value.
+
+           .. note::
+                It appears some locales are not able to correctly encode
+                the error message to ``str`` here, so ``%r`` form is used
+                for formatting errors (see ticket 24810)
+
         :param template_key: Template key to resolve value for.
         :type template_key: TemplateKey
         :return: Resolved template key value. None if failed/error.
         :rtype: str or None
         """
-        key_possibilities = []
+        possibilities = []
         key_length = template_key.length
+        key_name = template_key.name
+        previous_resolve = self.fields.get(key_name)
         next_token_positions = self._get_all_token_positions()[0]
 
         for token_start, token_end in next_token_positions:
@@ -172,64 +208,73 @@ class ParsedPath(object):
                 continue
 
             path_sub_str = self.normal_path[:token_start]
-            previous_resolve = self.fields.get(template_key.name)
             possible_value = None
             using_previous = False
 
-            if template_key.name in self.skip_keys:
-                # don't bother doing validation/conversion for this value
-                # as it's being skipped!
+            if key_name in self.skip_keys:  # 1. Skipping validation for key
                 possible_value = path_sub_str
-
-            elif os.path.sep in path_sub_str:
-                # Slashes are not allowed in key values!
-                # Note, the possible value is a section of the input path so
-                # the OS specific path separator needs to be checked for:
-                self._error("%s: Invalid value found for key %s: %s",
-                            self, template_key.name, path_sub_str)
-
-            elif previous_resolve is not None:
-                previous_str = str(previous_resolve)
-                if path_sub_str == previous_str:
-                    # Use previous resolve since they are the same
+            elif os.path.sep in path_sub_str:  # 2. No path separators
+                self._error(
+                    "%s: Invalid value found for key %s: %s",
+                    self, key_name, path_sub_str,
+                )
+            elif previous_resolve is not None:  # 3. Check if already resolved
+                if path_sub_str == str(previous_resolve):
                     possible_value = previous_resolve
                     using_previous = True
                 else:
-                    # Can't have two different values for the same key:
-                    self._error("%s: Conflicting values found for key %s: "
-                                "%s and %s",
-                                self, template_key.name,
-                                previous_resolve, path_sub_str)
-            else:
-                # Get the actual value for this key.
-                # This will also validate the value:
+                    self._error(
+                        "%s: Conflicting values found for key %s: %s and %s",
+                        self, key_name, previous_resolve, path_sub_str,
+                    )
+            else:  # 4. Check resolved value from substring
                 try:
                     possible_value = template_key.value_from_str(path_sub_str)
                 except TankError as error:
-                    # It appears some locales are not able to correctly encode
-                    # the error message to str here, so use the %r form for
-                    # the error (ticket 24810)
-                    self._error("%s: Failed to get value for key '%s' - %r",
-                                self, template_key.name, error)
+                    self._error(
+                        "%s: Failed to get value for key '%s' - %r",
+                        self, key_name, error,
+                    )
 
+            # Store possible solutions' information into possibilities
             if possible_value is not None:
-                possible_fields = self.fields.copy()
-                possible_fields[template_key.name] = possible_value
-                possible_path = ParsedPath(
-                    self.normal_path[token_end:],
-                    self.parts[2:],  # Start from next template key
-                    skip_keys=self.skip_keys,
-                    resolved_fields=possible_fields,
-
+                possible_solution = KeySolution(
+                    key_name=key_name,
+                    value=possible_value,
+                    remaining_path=self.normal_path[token_end:],
                 )
                 if using_previous:
-                    key_possibilities = [possible_path]
+                    possibilities = [possible_solution]
                     break
                 else:
-                    key_possibilities.append(possible_path)
+                    possibilities.append(possible_solution)
 
-        return key_possibilities
+        # Performance: defer recursion until all possibilities found
+        return [
+            self._create_possible_path(solution)
+            for solution in possibilities
+        ]
 
+    def _create_possible_path(self, solution):
+        """Create parsed path for a key's possible solution.
+
+        The solution is added into a copy of the resolved fields mapping
+        before creating a parsed path using it.
+
+        :param solution: Possible solution to a template key.
+        :type solution: KeySolution
+        :return: Parsed path for a key's possible solution.
+        :rtype: ParsedPath
+        """
+        resolved_fields = self.fields.copy()
+        resolved_fields[solution.key_name] = solution.value
+
+        return ParsedPath(
+            solution.remaining_path,
+            self.parts[2:],  # Start from next template key
+            skip_keys=self.skip_keys,
+            resolved_fields=resolved_fields,
+        )
 
     def _error(self, message, *message_args):
         """Set ``last_error`` and record error on logger.
@@ -239,8 +284,12 @@ class ParsedPath(object):
         :param message_args: Values to format message with
         :type message_args: object
         """
-        self.last_error = message % message_args
-        self.logger.error(message, *message_args)
+        if message_args:
+            self.last_error = message % message_args
+            self.logger.error(message, *message_args)
+        else:
+            self.last_error = message
+            self.logger.error(message)
 
     def _get_all_token_positions(self):
         """Find all occurrences of all tokens in the path.
@@ -275,6 +324,7 @@ class ParsedPath(object):
             previous_start = start_pos
 
             for found in re.finditer(re.escape(token), self.lower_path):
+                # Short for: start=found.start(), end=found.end()
                 position = TokenPosition(*found.span())
                 if position.start >= previous_start:
                     if not positions:
@@ -287,10 +337,12 @@ class ParsedPath(object):
             if positions:
                 token_positions.append(positions)
             else:
-                self._error("Tried to extract fields but the path does not "
-                            "fit the template:\n%s\n%s^--- Failed to find "
-                            "token \"%s\" from here",
-                            self.lower_path, " " * start_pos, token)
+                message = (
+                    "Path does not fit the template:\n"
+                    "%s\n"
+                    "%s^--- Failed to find token \"%s\" from here"
+                )
+                self._error(message, self.lower_path, " " * start_pos, token)
                 break
 
         else:  # No break from: for token in static_tokens
