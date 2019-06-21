@@ -12,6 +12,7 @@ from __future__ import print_function
 
 import sys
 import os
+import re
 
 import tank
 from tank import TankError
@@ -1026,7 +1027,7 @@ class TestGetKeysSepInValue(TestTemplatePath):
 
         self.check_error_message(TankError, expected_msg, template.get_fields, input_path)        
         
-    def test_ambiguous_begining(self):
+    def test_ambiguous_beginning(self):
         """
         Can't resolve if values are too ambiguous
         """
@@ -1055,7 +1056,7 @@ class TestGetKeysSepInValue(TestTemplatePath):
     def test_multi_ambiguous(self):
         """
         Can't resolve if values are too ambiguous
-        """        
+        """
         self.keys["favorites"] = StringKey("favorites")
         definition = "build/{Asset}_{name}_{favorites}/maya"
         input_path = "build/cat_man_doogle_do_dandy_dod/maya"
@@ -1066,7 +1067,50 @@ class TestGetKeysSepInValue(TestTemplatePath):
                         " - {'Asset': 'cat_man_doogle'}\n"
                         " - {'Asset': 'cat_man_doogle_do', 'favorites': 'dod', 'name': 'dandy'}"
                         % template)
-        self.check_error_message(TankError, expected_msg, template.get_fields, input_path)         
+        self.check_error_message(TankError, expected_msg, template.get_fields, input_path)
+
+    def test_resolve_ambiguous_from_previous(self):
+        """
+        Resolve ambiguous keys if they have already been resolved before.
+        """
+        definition = "{Asset}/build/{Asset}_{name}/maya"
+        asset_name = "cat_man_doogle_do_dandy_dod"
+        input_parts = ["build", asset_name, "maya"]
+
+        for found in re.finditer("_", asset_name):
+            expected = {
+                "Asset": asset_name[:found.start()],  # e.g. cat_man
+                "name": asset_name[found.end():],  # e.g. doogle_do_dandy_dod
+            }
+            # e.g. cat_man/build/cat_man_doogle_do_dandy_dod/maya
+            input_path = "/".join([expected["Asset"]] + input_parts)
+
+            self.assert_path_matches(definition, input_path, expected)
+
+    def test_resolve_multi_ambiguous_from_previous(self):
+        """
+        Resolve multiple ambiguous keys if they have already been
+        resolved before.
+
+        WIP
+
+        self.keys["favorites"] = StringKey("favorites")
+        definition = "{Asset}/{name}/build/{Asset}_{name}_{favorites}/maya"
+        asset_name = "cat_man_doogle_do_dandy"
+        asset_name_end = len(asset_name)
+        asset_name_favorites = asset_name + "_dod"
+        input_parts = ["build", asset_name, "maya"]
+
+        for found in re.finditer("_", asset_name):
+            expected = {
+                "Asset": asset_name_favorites[:found.start()],  # e.g. cat_man
+                "name": asset_name_favorites[found.end():],  # e.g. doogle_dodandy_dod
+            }
+            # e.g. cat_man/build/cat_man_doogle_do_dandy_dod/maya
+            input_path = "/".join([expected["Asset"]] + input_parts)
+
+            self.assert_path_matches(definition, input_path, expected)
+        """
 
     def test_ambiguous_wrong_type(self):
         keys = {"some_num": IntegerKey("some_num"),
