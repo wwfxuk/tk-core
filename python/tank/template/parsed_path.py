@@ -88,8 +88,8 @@ class ParsedPath(object):
     :type child_possibilities: list[ParsedPath]
     :ivar all_possibilities: Child parsed paths's children
     :type all_possibilities: list[ParsedPath]
-    :ivar fully_resolved: Whether all template keys required are resolved
-    :type fully_resolved: bool
+    :ivar fully_resolved: All possible fully resolved key value combinations
+    :type fully_resolved: list[dict[str, str]]
     :ivar logger: Internal Python logger used to log messages
     :type logger: logging.Logger
     """
@@ -114,7 +114,7 @@ class ParsedPath(object):
         self.last_error = None
         self.child_possibilities = []
         self.all_possibilities = []
-        self.fully_resolved = not self.input_path
+        self.fully_resolved = []
         self.logger = LogManager.get_logger(self.__class__.__name__)
 
         # all token comparisons are done case insensitively.
@@ -133,44 +133,48 @@ class ParsedPath(object):
                     'Path still remains (after parsing): "%s"',
                     self.input_path,
                 )
+        else:
+            self.fully_resolved = [self.fields]
 
     def __nonzero__(self):
-        return self.last_error is None and self.fully_resolved
+        return self.last_error is None and bool(self.fully_resolved)
 
     def __str__(self):
-        return '{0} "{1}" {2}'.format(
-            '*' if self else ' ',
-            self.input_path,
-            self.fields,
-        )
+        template = '{0.__class__.__name__} [{1}] "{0.input_path}" {0.fields}'
+        return template.format(self, '*' if self else ' ')
 
     def _resolve_possibilities(self):
-        resolved_paths = [
-            path
-            for path in self.child_possibilities
-            if path.fully_resolved
-        ]
+        resolved_kvs = []
+        child_errors = []
+        for path in self.child_possibilities:
+            if path.last_error is not None:
+                child_errors.append(path.last_error)
 
-        if len(resolved_paths) == 1:
-            self.last_error = resolved_paths[0].last_error
+            for resolved_keys_values in path.fully_resolved:
+                if resolved_keys_values not in resolved_kvs:
+                    resolved_kvs.append(resolved_keys_values)
+
+        if len(resolved_kvs) == 1:
+            self.last_error = None
             self.fields = {
                 key_name: value
-                for key_name, value in resolved_paths[0].fields.items()
+                for key_name, value in resolved_kvs[0].items()
                 if key_name not in self.skip_keys
             }
-        elif resolved_paths:
+        elif len(child_errors) == 1:
+            self.last_error = child_errors[0]
+        elif resolved_kvs:
             error = 'Multiple possible solutions found for %s'
             error_lines = ['"{0}"'.format(self._normal_path)]
-            error_lines += [str(path.fields) for path in self.all_possibilities if path.fields]
-            # error_lines += [str(path.fields) for path in self.all_possibilities if path.fields and not path.input_path]
+            error_lines += [str(kvs) for kvs in resolved_kvs]
             self._error(error, '\n - '.join(error_lines))
         else:
             error = 'No possible solutions found for %s'
             error_lines = ['"{0}"'.format(self._normal_path)]
-            error_lines += [path.last_error for path in self.child_possibilities if path.last_error]
-            self._error(error, '\n - '.join(error_lines))
+            error_lines += child_errors
+            self._error(error, '\n * '.join(error_lines))
 
-        return bool(resolved_paths)
+        return resolved_kvs
 
     def _generate_possibilities(self):
         possibilities = []
@@ -397,13 +401,16 @@ class ParsedPath(object):
                 # Remove positions that can't be valid after for loop completed
                 # i.e. Where the position is greater than the
                 #      last possible position of any subsequent tokens
-                new_positions = [
-                    token_position
-                    for token_position in token_positions[index]
-                    if token_position.start < max_index
-                ]
+                new_maxes = []
+                new_positions = []
+
+                for token_position in token_positions[index]:
+                    if token_position.start < max_index:
+                        new_maxes.append(token_position.start)
+                        new_positions.append(token_position)
+
                 token_positions[index] = new_positions
-                max_index = max(new_positions) if new_positions else 0
+                max_index = max(new_maxes) if new_maxes else 0
 
         # Fall back to positions for the end of input string if empty
         return token_positions or [[(input_last_index, input_last_index)]]
