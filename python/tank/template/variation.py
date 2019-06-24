@@ -93,7 +93,7 @@ class Variation(object):
         Has key names as strings and no format, enum or default values
         """
         regex = r"{(%s)}" % TEMPLATE_KEY_NAME_REGEX
-        self._cleaned = re.sub(regex, "%(\g<1>)s", self._fixed)
+        self._cleaned = re.sub(regex, r"%(\g<1>)s", self._fixed)
 
     def _update_expanded_definition(self):
         """

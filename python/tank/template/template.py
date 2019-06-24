@@ -173,7 +173,7 @@ class Template(object):
         return [key for key in required_keys if fields.get(key) is None]
 
     def apply_fields(self, fields, platform=None):
-        """
+        r"""
         Creates path using fields. Certain fields may be processed in special ways, for
         example :class:`SequenceKey` fields, which can take a `FORMAT` string which will intelligently
         format a image sequence specifier based on the type of data is being handled. Example::
