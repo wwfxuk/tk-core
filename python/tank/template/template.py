@@ -273,7 +273,7 @@ class Template(object):
 
         """
         # split definition by optional sections
-        tokens = re.split("(\[[^]]*\])", definition)
+        tokens = re.split(r"(\[[^]]*\])", definition)
 
         # seed with empty string
         definitions = ['']
@@ -290,10 +290,10 @@ class Template(object):
                 # Add definitions skipping this optional value
                 temp_definitions = definitions[:]
                 # strip brackets from token
-                token = re.sub('[\[\]]', '', token)
+                token = re.sub(r'[\[\]]', '', token)
 
             # check non-optional contains no dangling brackets
-            if re.search("[\[\]]", token):
+            if re.search(r"[\[\]]", token):
                 raise TankError("Square brackets are not allowed outside of optional section definitions.")
 
             # make definitions with token appended
