@@ -359,7 +359,6 @@ class Template(object):
         skip_keys = skip_keys or []
 
         # Path should split into keys as per template
-        path_fields = {}
         try:
             path_fields = self.get_fields(path, skip_keys=skip_keys)
         except TankError:

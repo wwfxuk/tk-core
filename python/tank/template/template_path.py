@@ -1,7 +1,6 @@
 
 import os
 
-from .variation import Variation
 from .template import Template
 from ..errors import TankError
 

@@ -3,14 +3,14 @@ import os
 from .template import Template
 
 
-__all__ = ('TemplateString')
+__all__ = ('TemplateString',)
 
 
 class TemplateString(Template):
     """
     :class:`Template` class for templates representing strings.
 
-    Templated strings are useful if you want to write code where you can configure
+    Template strings are useful if you want to write code where you can configure
     the formatting of strings, for example how a name or other string field should
     be configured in Shotgun, given a series of key values.
     """
@@ -38,8 +38,8 @@ class TemplateString(Template):
         """
         Extracts key name, value pairs from a string. Example::
 
-            >>> input = 'filename.v003.ma'
-            >>> template_string.get_fields(input)
+            >>> input_name = 'filename.v003.ma'
+            >>> template_string.get_fields(input_name)
 
             {'name': 'henry',
              'version': 3}

@@ -84,6 +84,7 @@ def make_template_paths(data, keys, all_per_platform_roots, default_root=None):
     :param keys: Available keys. Dictionary of form: {<key name> : <TemplateKey object>}
     :param all_per_platform_roots: Root paths for all platforms. nested dictionary first keyed by
                                    storage root name and then by sys.platform-style os name.
+    :param default_root: Value for "root_name" when  missing from template data.
 
     :returns: Dictionary of form {<template name> : <TemplatePath object>}
     """
@@ -126,14 +127,13 @@ def make_template_paths(data, keys, all_per_platform_roots, default_root=None):
             raise TankError("Undefined Shotgun storage! The local file storage '%s' is not defined for this "
                             "operating system." % root_name)
 
-        template_path = TemplatePath(
+        template_paths[template_name] = TemplatePath(
             definition,
             keys,
             root_path,
             template_name,
             all_per_platform_roots[root_name]
         )
-        template_paths[template_name] = template_path
 
     return template_paths
 
@@ -162,12 +162,12 @@ def make_template_strings(data, keys, template_paths):
             msg = "Template %s validate_with is set to undefined template %s."
             raise TankError(msg %(template_name, validator_name))
 
-        template_string = TemplateString(definition,
-                                         keys,
-                                         template_name,
-                                         validate_with=validator)
-
-        template_strings[template_name] = template_string
+        template_strings[template_name] = TemplateString(
+            definition,
+            keys,
+            template_name,
+            validate_with=validator,
+        )
 
     return template_strings
 
