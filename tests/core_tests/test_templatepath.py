@@ -1038,7 +1038,7 @@ class TestGetKeysSepInValue(TestTemplatePath):
                         " - {'Asset': 'cat', 'name': 'man_doogle'}\n"
                         " - {'Asset': 'cat_man', 'name': 'doogle'}"
                         % template)
-        self.check_error_message(TankError, expected_msg, template.get_fields, input_path)        
+        self.check_error_message(TankError, expected_msg, template.get_fields, input_path)
 
     def test_ambiguous_end(self):
         """
@@ -1062,16 +1062,22 @@ class TestGetKeysSepInValue(TestTemplatePath):
         input_path = "build/cat_man_doogle_do_dandy_dod/maya"
         template = TemplatePath(definition, self.keys, "")
         expected_msg = ("Template %s: Multiple possible solutions found for \"cat_man_doogle_do_dandy_dod/maya\"\n"
-                        " - {'Asset': 'cat'}\n"
-                        " - {'Asset': 'cat_man'}\n"
-                        " - {'Asset': 'cat_man_doogle'}\n"
+                        " - {'Asset': 'cat', 'favorites': 'doogle_do_dandy_dod', 'name': 'man'}\n"
+                        " - {'Asset': 'cat', 'favorites': 'do_dandy_dod', 'name': 'man_doogle'}\n"
+                        " - {'Asset': 'cat', 'favorites': 'dandy_dod', 'name': 'man_doogle_do'}\n"
+                        " - {'Asset': 'cat', 'favorites': 'dod', 'name': 'man_doogle_do_dandy'}\n"
+                        " - {'Asset': 'cat_man', 'favorites': 'do_dandy_dod', 'name': 'doogle'}\n"
+                        " - {'Asset': 'cat_man', 'favorites': 'dandy_dod', 'name': 'doogle_do'}\n"
+                        " - {'Asset': 'cat_man', 'favorites': 'dod', 'name': 'doogle_do_dandy'}\n"
+                        " - {'Asset': 'cat_man_doogle', 'favorites': 'dandy_dod', 'name': 'do'}\n"
+                        " - {'Asset': 'cat_man_doogle', 'favorites': 'dod', 'name': 'do_dandy'}\n"
                         " - {'Asset': 'cat_man_doogle_do', 'favorites': 'dod', 'name': 'dandy'}"
                         % template)
         self.check_error_message(TankError, expected_msg, template.get_fields, input_path)
 
     def test_resolve_ambiguous_from_previous(self):
         """
-        Resolve ambiguous keys if they have already been resolved before.
+        Resolve 1 ambiguous key if they have already been resolved before.
         """
         definition = "{Asset}/build/{Asset}_{name}/maya"
         asset_name = "cat_man_doogle_do_dandy_dod"
@@ -1089,28 +1095,38 @@ class TestGetKeysSepInValue(TestTemplatePath):
 
     def test_resolve_multi_ambiguous_from_previous(self):
         """
-        Resolve multiple ambiguous keys if they have already been
-        resolved before.
+        Resolve multiple ambiguous keys if all previously resolved.
+        """
+        def split_underscores(text):
+            """Iterate text substrings split by underscore.
 
-        WIP
+            :return: Text before and after underscore split
+            :rtype: (str, str)
+            """
+            for found_underscore in re.finditer("_", text):
+                yield (
+                    text[:found_underscore.start()],
+                    text[found_underscore.end():],
+                )
 
         self.keys["favorites"] = StringKey("favorites")
         definition = "{Asset}/{name}/build/{Asset}_{name}_{favorites}/maya"
-        asset_name = "cat_man_doogle_do_dandy"
-        asset_name_end = len(asset_name)
-        asset_name_favorites = asset_name + "_dod"
-        input_parts = ["build", asset_name, "maya"]
+        asset_name_favorites = "cat_man_doogle_do_dandy_dod"
+        build_folders = ["build", asset_name_favorites, "maya"]
 
-        for found in re.finditer("_", asset_name):
-            expected = {
-                "Asset": asset_name_favorites[:found.start()],  # e.g. cat_man
-                "name": asset_name_favorites[found.end():],  # e.g. doogle_dodandy_dod
-            }
-            # e.g. cat_man/build/cat_man_doogle_do_dandy_dod/maya
-            input_path = "/".join([expected["Asset"]] + input_parts)
+        for asset, name_favorites in split_underscores(asset_name_favorites):
+            for name, favorites in split_underscores(name_favorites):
+                expected = {
+                    "Asset": asset,
+                    "name": name,
+                    "favorites": favorites,
+                }
 
-            self.assert_path_matches(definition, input_path, expected)
-        """
+                # e.g. cat_man/doogle/build/cat_man_doogle_do_dandy_dod/maya
+                leading_folders = [asset, name]
+                input_path = "/".join(leading_folders + build_folders)
+
+                self.assert_path_matches(definition, input_path, expected)
 
     def test_ambiguous_wrong_type(self):
         keys = {"some_num": IntegerKey("some_num"),

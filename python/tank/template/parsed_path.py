@@ -70,7 +70,8 @@ class ParsedPath(object):
         self.skip_keys = skip_keys or []
         self.fields = resolved_fields or {}
         self.last_error = None
-        self.possibilities = []
+        self.child_possibilities = []
+        self.all_possibilities = []
         self.fully_resolved = not self.input_path
         self.logger = LogManager.get_logger(self.__class__.__name__)
         self.normal_path = os.path.normpath(self.input_path)
@@ -80,7 +81,10 @@ class ParsedPath(object):
 
         if self.input_path:
             if self.parts:
-                self.possibilities = self._generate_possibilities()
+                for possible_path in self._generate_possibilities():
+                    self.child_possibilities.append(possible_path)
+                    self.all_possibilities.extend(possible_path.child_possibilities)
+                # self.all_possibilities.extend(self.child_possibilities)
                 self.fully_resolved = self._resolve_possibilities()
             else:
                 self._error(
@@ -91,7 +95,7 @@ class ParsedPath(object):
     def _resolve_possibilities(self):
         resolved_paths = [
             path
-            for path in self.possibilities
+            for path in self.child_possibilities
             if path.fully_resolved
         ]
 
@@ -105,12 +109,13 @@ class ParsedPath(object):
         elif resolved_paths:
             error = 'Multiple possible solutions found for %s'
             error_lines = ['"{0}"'.format(self.normal_path)]
-            error_lines += [str(path.fields) for path in resolved_paths]
+            error_lines += [str(path.fields) for path in self.all_possibilities if path.fields]
+            # error_lines += [str(path.fields) for path in self.all_possibilities if path.fields and not path.input_path]
             self._error(error, '\n - '.join(error_lines))
         else:
             error = 'No possible solutions found for %s'
             error_lines = ['"{0}"'.format(self.normal_path)]
-            error_lines += [path.last_error for path in self.possibilities]
+            error_lines += [path.last_error for path in self.child_possibilities if path.last_error]
             self._error(error, '\n - '.join(error_lines))
 
         return bool(resolved_paths)
