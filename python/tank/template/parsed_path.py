@@ -7,9 +7,7 @@
 # By accessing, using, copying or modifying this work you indicate your
 # agreement to the Shotgun Pipeline Toolkit Source Code License. All rights
 # not expressly granted therein are reserved by Shotgun Software Inc.
-"""
-Parsing of template paths into values for specified keys using a list of static tokens
-"""
+"""Parsing of template paths into values for variant parts."""
 from collections import namedtuple
 import os
 import re
@@ -18,79 +16,47 @@ from ..errors import TankError
 from ..log import LogManager
 from ..templatekey import TemplateKey
 
-"""
-Container class used to store possible resolved values during template
-parsing.  Stores the possible value as well as the downstream hierarchy
-of possible values, the last error found whilst parsing and a flag
-to specify if any of the branches in the downstream hierarchy are fully
-resolved (a value was found for every remaining key)
 
-:var value:                 The resolved value to keep track of
-:var downstream_values:     ResolvedValue instances for all possible downstream branches of
-                            possible resolved values
-:var fully_resolved:        Flag to track if any of the downstream branches are fully resolved
-                            or not
-:var last_error:            The last error reported from the template parsing for the current
-                            branch of possible values.
+TokenPosition = namedtuple(
+    'TokenPosition',
+    ['start', 'end'],
+)
 
-..code-block: python
-
-    >>> var_def = 'shots/{Sequence}/{Shot}/{Step}/work/{Shot}.{branch}.v{version}.{snapshot}.ma'
-    >>> re.split(r'\{[^\}]+\}', var_def)
-    ['shots/', '/', '/', '/work/', '.', '.v', '.', '.ma']
-    >>>
-"""
-
-TokenPosition = namedtuple('TokenPosition', ['start', 'end'])
-
-KeySolution = namedtuple('KeySolution', ['key_name', 'value', 'remaining_path'])
+KeySolution = namedtuple(
+    'KeySolution',
+    ['key_name', 'value', 'remaining_path'],
+)
 
 
 class ParsedPath(object):
-    """
-    Class for parsing a path for a known set of keys, and known set of static
-    tokens which should appear between the key values.
+    """Parse a path for a known set of template keys/static path tokens.
 
     Passed downstream during recursion:
 
     - ``skip_keys``
-    - Current ``fields`` (with possible key value)
+    - Current ``fields`` (with possible key value solution)
 
     Passed upstream after recursion:
+
     - Immediate child paths stored as ``self.child_possibilities``
-
-    If 1 child path and fully resolved:
-    - Inherit fields
-    - Inherit last_error
-    - Mark as fully resolved
-
-    If multiple child paths:
-        If 1 is fully resolved:
-        - Mark as fully resolved
-        - Inherit fields
-        - Inherit last_error
-        If > 1 fully resolved:
-        - Mark as fully resolved
-        - Error: get all fully resolved paths
-
+    - Unique resolved fields from children as ``self.fully_resolved``
+    - If only 1 children has error, inherit that as ``self.last_error``
 
     :ivar input_path: Path parsed.
     :type input_path: str
     :ivar parts: Ordered TemplateKeys and non-template key texts to parse path.
     :type parts: list[TemplateKey or str]
-    :ivar skip_keys: Optional TemplateKey names to skip validation
+    :ivar skip_keys: Optional TemplateKey names to skip validation.
     :type skip_keys: list[str]
-    :ivar fields: Resolved template key values
+    :ivar fields: Resolved template key names and values.
     :type fields: dict[str, str]
     :ivar last_error: Error message from parsing this or child paths.
     :type last_error: str or None
-    :ivar child_possibilities: Child parsed paths
-    :type child_possibilities: list[ParsedPath]
-    :ivar all_possibilities: Child parsed paths's children
-    :type all_possibilities: list[ParsedPath]
-    :ivar fully_resolved: All possible fully resolved key value combinations
+    :ivar possibilities: Child parsed paths directly under current instance.
+    :type possibilities: list[ParsedPath]
+    :ivar fully_resolved: All possible fully resolved key value combinations.
     :type fully_resolved: list[dict[str, str]]
-    :ivar logger: Internal Python logger used to log messages
+    :ivar logger: Internal Python logger used to log messages.
     :type logger: logging.Logger
     """
 
@@ -112,8 +78,7 @@ class ParsedPath(object):
         self.skip_keys = skip_keys or []
         self.fields = resolved_fields or {}
         self.last_error = None
-        self.child_possibilities = []
-        self.all_possibilities = []
+        self.possibilities = []
         self.fully_resolved = []
         self.logger = LogManager.get_logger(self.__class__.__name__)
 
@@ -123,10 +88,7 @@ class ParsedPath(object):
 
         if self.input_path:
             if self.parts:
-                for possible_path in self._generate_possibilities():
-                    self.child_possibilities.append(possible_path)
-                    self.all_possibilities.extend(possible_path.child_possibilities)
-                # self.all_possibilities.extend(self.child_possibilities)
+                self.possibilities = self._generate_possibilities()
                 self.fully_resolved = self._resolve_possibilities()
             else:
                 self._error(
@@ -137,46 +99,100 @@ class ParsedPath(object):
             self.fully_resolved = [self.fields]
 
     def __nonzero__(self):
+        """Whether there is no errors and at least 1 fully resolved field.
+
+        :return: No errors and at least 1 fully resolved field.
+        :rtype: bool
+        """
         return self.last_error is None and bool(self.fully_resolved)
 
     def __str__(self):
-        template = '{0.__class__.__name__} [{1}] "{0.input_path}" {0.fields}'
+        """Pretty string formatting for current instance.
+
+        - Class name
+        - No errors and fully resolved (``[*]`` if true, else ``[ ]``)
+        - Input path parsed
+        - Fields parsed from path
+
+        :rtype: bool
+        """
+        template = '{0.__class__.__name__}[{1}] "{0.input_path}" {0.fields}'
         return template.format(self, '*' if self else ' ')
 
+    def __repr__(self):
+        """Compute the "official" string representation of this ParsedPath.
+
+        If at all possible, this should look like a valid Python expression
+        that could be used to recreate an object with the same value.
+
+        :return: Official string representation of this ParsedPath.
+        :rtype: str
+        """
+        template = (
+            '{0.__class__.__name__}('
+            '"{0.input_path}", '
+            '{0.parts}, '
+            'skip_keys={0.skip_keys}, '
+            'resolved_fields={0.fields})'
+        )
+        return template.format(self)
+
     def _resolve_possibilities(self):
-        resolved_kvs = []
+        """Resolve current possibilities.
+
+        - If there's only 1 resolved solution from children, unset any current
+          errors and set that key value mapping as fields. Otherwise,
+        - If there's only 1 error from children, set it as current error.
+          This is so messages are relevant to the actual place it occurred,
+          which may be from a few levels deep into the recursion. Otherwise,
+        - If there's multiple fully resolved solutions, log error against
+          current input path. Otherwise,
+        - If there's multiple errors from children, log all children
+          errors against current input path.
+
+        :return: Fully resolved key value mappings, if any.
+        :rtype: list[dict[str, str]]
+        """
+        resolved_fields = []
         child_errors = []
-        for path in self.child_possibilities:
-            if path.last_error is not None:
-                child_errors.append(path.last_error)
 
-            for resolved_keys_values in path.fully_resolved:
-                if resolved_keys_values not in resolved_kvs:
-                    resolved_kvs.append(resolved_keys_values)
+        # Collect errors, UNIQUE resolved template key/values from children.
+        for child_path in self.possibilities:
+            if child_path.last_error is not None:
+                child_errors.append(child_path.last_error)
 
-        if len(resolved_kvs) == 1:
+            # Can't use sets: dicts are un-hashable but comparable
+            for fields in child_path.fully_resolved:
+                if fields not in resolved_fields:
+                    resolved_fields.append(fields)
+
+        if len(resolved_fields) == 1:
             self.last_error = None
             self.fields = {
                 key_name: value
-                for key_name, value in resolved_kvs[0].items()
+                for key_name, value in resolved_fields[0].items()
                 if key_name not in self.skip_keys
             }
         elif len(child_errors) == 1:
             self.last_error = child_errors[0]
-        elif resolved_kvs:
+        elif resolved_fields:
             error = 'Multiple possible solutions found for %s'
             error_lines = ['"{0}"'.format(self._normal_path)]
-            error_lines += [str(kvs) for kvs in resolved_kvs]
+            error_lines += [str(fields) for fields in resolved_fields]
             self._error(error, '\n - '.join(error_lines))
         else:
             error = 'No possible solutions found for %s'
-            error_lines = ['"{0}"'.format(self._normal_path)]
-            error_lines += child_errors
-            self._error(error, '\n * '.join(error_lines))
+            error_lines = ['"{0}"'.format(self._normal_path), self.last_error]
+            self._error(error, '\n * '.join(error_lines + child_errors))
 
-        return resolved_kvs
+        return resolved_fields
 
     def _generate_possibilities(self):
+        """Generate a list of possible (template key) outcomes.
+
+        :return: Possible outcomes for child path parts.
+        :rtype: list[ParsedPath]
+        """
         possibilities = []
         current_part = self.parts[0]
 
@@ -200,17 +216,6 @@ class ParsedPath(object):
                 self._error(message, current_lowercase, self._lower_path)
 
         return possibilities
-
-    def _resolve_against_previous(self, template_key, text):
-        previous_resolve = self.fields.get(template_key.name)
-        resolved_value = None
-        if previous_resolve is not None:
-            previous_str = str(previous_resolve)
-            if text == previous_str:
-                # Use previous resolve since they are the same
-                resolved_value = previous_resolve
-
-        return resolved_value
 
     def _resolve_key(self, template_key):
         """Resolve the template key value for a given input text.

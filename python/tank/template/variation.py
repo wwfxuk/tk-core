@@ -8,17 +8,10 @@ from ..constants import TEMPLATE_KEY_NAME_REGEX
 
 
 class Variation(object):
-    """
-    Represents an expression containing several dynamic tokens
-    in the form of :class:`TemplateKey` objects.
-    """
-    def __init__(self, definition, keys, template_name=None, prefix=''):
-        """
-        This class is not designed to be used directly but
-        should be subclassed by any Template implementations.
+    """Variation for a particular Template."""
 
-        Current implementations can be found in
-        the :class:`TemplatePath` and :class:`TemplateString` classes.
+    def __init__(self, definition, keys, template_name=None, prefix=''):
+        """Construct a variation for a particular definition and template keys.
 
         :param definition: Template definition variation.
         :type definition: str

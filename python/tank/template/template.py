@@ -13,7 +13,6 @@ Management of file and directory templates.
 
 """
 
-import os
 import re
 
 from .variation import Variation
@@ -27,37 +26,6 @@ class Template(object):
     Represents an expression containing several dynamic tokens
     in the form of :class:`TemplateKey` objects.
     """
-
-    @classmethod
-    def _keys_from_definition(cls, definition, template_name, keys):
-        """Extracts Template Keys from a definition.
-
-        :param definition: Template definition as string
-        :param template_name: Name of template.
-        :param keys: Mapping of key names to keys as dict
-
-        :returns: Mapping of key names to keys and collection of keys ordered as they appear in the definition.
-        :rtype: List of Dictionaries, List of lists
-        """
-        names_keys = {}
-        ordered_keys = []
-        # regular expression to find key names
-        regex = r"(?<={)%s(?=})" % TEMPLATE_KEY_NAME_REGEX
-        key_names = re.findall(regex, definition)
-        for key_name in key_names:
-            key = keys.get(key_name)
-            if key is None:
-                msg = "Template definition for template %s refers to key {%s}, which does not appear in supplied keys."
-                raise TankError(msg % (template_name, key_name))
-            else:
-                if names_keys.get(key.name, key) != key:
-                    # Different keys using same name
-                    msg = ("Template definition for template %s uses two keys" +
-                           " which use the name '%s'.")
-                    raise TankError(msg % (template_name, key.name))
-                names_keys[key.name] = key
-                ordered_keys.append(key)
-        return names_keys, ordered_keys
 
     def __init__(self, definition, keys, name=None, prefix=''):
         """
@@ -324,11 +292,11 @@ class Template(object):
                 # strip brackets from token
                 token = re.sub('[\[\]]', '', token)
 
-            # check non-optional contains no dangleing brackets
+            # check non-optional contains no dangling brackets
             if re.search("[\[\]]", token):
                 raise TankError("Square brackets are not allowed outside of optional section definitions.")
 
-            # make defintions with token appended
+            # make definitions with token appended
             for definition in definitions:
                 temp_definitions.append(definition + token)
 
@@ -348,25 +316,6 @@ class Template(object):
                 new_def = r"{%s}" % key.name
                 definition = re.sub(old_def, new_def, definition)
         return definition
-
-    def _clean_definition(self, definition):
-        # Create definition with key names as strings with no format, enum or default values
-        regex = r"{(%s)}" % TEMPLATE_KEY_NAME_REGEX
-        cleaned_definition = re.sub(regex, "%(\g<1>)s", definition)
-        return cleaned_definition
-
-    def _calc_static_tokens(self, definition):
-        """
-        Finds the tokens from a definition which are not involved in defining keys.
-        """
-        # expand the definition to include the prefix unless the definition is empty in which
-        # case we just want to parse the prefix.  For example, in the case of a path template,
-        # having an empty definition would result in expanding to the project/storage root
-        expanded_definition = os.path.join(self._prefix, definition) if definition else self._prefix
-        regex = r"{%s}" % TEMPLATE_KEY_NAME_REGEX
-        tokens = re.split(regex, expanded_definition.lower())
-        # Remove empty strings
-        return [x for x in tokens if x]
 
     @property
     def parent(self):
