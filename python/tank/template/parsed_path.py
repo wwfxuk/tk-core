@@ -50,6 +50,48 @@ class ParsedPath(object):
     """
     Class for parsing a path for a known set of keys, and known set of static
     tokens which should appear between the key values.
+
+    Passed downstream during recursion:
+
+    - ``skip_keys``
+    - Current ``fields`` (with possible key value)
+
+    Passed upstream after recursion:
+    - Immediate child paths stored as ``self.child_possibilities``
+
+    If 1 child path and fully resolved:
+    - Inherit fields
+    - Inherit last_error
+    - Mark as fully resolved
+
+    If multiple child paths:
+        If 1 is fully resolved:
+        - Mark as fully resolved
+        - Inherit fields
+        - Inherit last_error
+        If > 1 fully resolved:
+        - Mark as fully resolved
+        - Error: get all fully resolved paths
+
+
+    :ivar input_path: Path parsed.
+    :type input_path: str
+    :ivar parts: Ordered TemplateKeys and non-template key texts to parse path.
+    :type parts: list[TemplateKey or str]
+    :ivar skip_keys: Optional TemplateKey names to skip validation
+    :type skip_keys: list[str]
+    :ivar fields: Resolved template key values
+    :type fields: dict[str, str]
+    :ivar last_error: Error message from parsing this or child paths.
+    :type last_error: str or None
+    :ivar child_possibilities: Child parsed paths
+    :type child_possibilities: list[ParsedPath]
+    :ivar all_possibilities: Child parsed paths's children
+    :type all_possibilities: list[ParsedPath]
+    :ivar fully_resolved: Whether all template keys required are resolved
+    :type fully_resolved: bool
+    :ivar logger: Internal Python logger used to log messages
+    :type logger: logging.Logger
     """
 
     def __init__(self, input_path, variation_parts, skip_keys=None, resolved_fields=None):
@@ -74,10 +116,10 @@ class ParsedPath(object):
         self.all_possibilities = []
         self.fully_resolved = not self.input_path
         self.logger = LogManager.get_logger(self.__class__.__name__)
-        self.normal_path = os.path.normpath(self.input_path)
 
         # all token comparisons are done case insensitively.
-        self.lower_path = self.normal_path.lower()
+        self._normal_path = os.path.normpath(self.input_path)
+        self._lower_path = self._normal_path.lower()
 
         if self.input_path:
             if self.parts:
@@ -91,6 +133,16 @@ class ParsedPath(object):
                     'Path still remains (after parsing): "%s"',
                     self.input_path,
                 )
+
+    def __nonzero__(self):
+        return self.last_error is None and self.fully_resolved
+
+    def __str__(self):
+        return '{0} "{1}" {2}'.format(
+            '*' if self else ' ',
+            self.input_path,
+            self.fields,
+        )
 
     def _resolve_possibilities(self):
         resolved_paths = [
@@ -108,13 +160,13 @@ class ParsedPath(object):
             }
         elif resolved_paths:
             error = 'Multiple possible solutions found for %s'
-            error_lines = ['"{0}"'.format(self.normal_path)]
+            error_lines = ['"{0}"'.format(self._normal_path)]
             error_lines += [str(path.fields) for path in self.all_possibilities if path.fields]
             # error_lines += [str(path.fields) for path in self.all_possibilities if path.fields and not path.input_path]
             self._error(error, '\n - '.join(error_lines))
         else:
             error = 'No possible solutions found for %s'
-            error_lines = ['"{0}"'.format(self.normal_path)]
+            error_lines = ['"{0}"'.format(self._normal_path)]
             error_lines += [path.last_error for path in self.child_possibilities if path.last_error]
             self._error(error, '\n - '.join(error_lines))
 
@@ -128,9 +180,9 @@ class ParsedPath(object):
             possibilities.extend(self._resolve_key(current_part))
         else:
             current_lowercase = current_part.lower()
-            if self.lower_path.startswith(current_lowercase):
+            if self._lower_path.startswith(current_lowercase):
                 possible_path = ParsedPath(
-                    self.normal_path[len(current_part):],
+                    self._normal_path[len(current_part):],
                     self.parts[1:],  # Start from next template key
                     skip_keys=self.skip_keys,
                     resolved_fields=self.fields.copy(),
@@ -141,19 +193,9 @@ class ParsedPath(object):
                     "Template has no keys and first token (%s) "
                     "doesn't match the input path (%s)"
                 )
-                self._error(message, current_lowercase, self.lower_path)
+                self._error(message, current_lowercase, self._lower_path)
 
         return possibilities
-
-    def __nonzero__(self):
-        return self.last_error is None and self.fully_resolved
-
-    def __str__(self):
-        return '{0} "{1}" {2}'.format(
-            '*' if self else ' ',
-            self.input_path,
-            self.fields,
-        )
 
     def _resolve_against_previous(self, template_key, text):
         previous_resolve = self.fields.get(template_key.name)
@@ -212,7 +254,7 @@ class ParsedPath(object):
             if key_length is not None and token_start < key_length:
                 continue
 
-            path_sub_str = self.normal_path[:token_start]
+            path_sub_str = self._normal_path[:token_start]
             possible_value = None
             using_previous = False
 
@@ -246,7 +288,7 @@ class ParsedPath(object):
                 possible_solution = KeySolution(
                     key_name=key_name,
                     value=possible_value,
-                    remaining_path=self.normal_path[token_end:],
+                    remaining_path=self._normal_path[token_end:],
                 )
                 if using_previous:
                     possibilities = [possible_solution]
@@ -315,9 +357,9 @@ class ParsedPath(object):
         :rtype: list[list[(int, int)]]
         """
         start_pos = 0
-        max_index = len(self.lower_path)
+        max_index = len(self._lower_path)
         token_positions = []
-        input_last_index = len(self.normal_path)
+        input_last_index = len(self._normal_path)
         static_tokens = (
             part.lower()
             for part in self.parts
@@ -328,7 +370,7 @@ class ParsedPath(object):
             positions = []
             previous_start = start_pos
 
-            for found in re.finditer(re.escape(token), self.lower_path):
+            for found in re.finditer(re.escape(token), self._lower_path):
                 # Short for: start=found.start(), end=found.end()
                 position = TokenPosition(*found.span())
                 if position.start >= previous_start:
@@ -347,7 +389,7 @@ class ParsedPath(object):
                     "%s\n"
                     "%s^--- Failed to find token \"%s\" from here"
                 )
-                self._error(message, self.lower_path, " " * start_pos, token)
+                self._error(message, self._lower_path, " " * start_pos, token)
                 break
 
         else:  # No break from: for token in static_tokens
