@@ -265,7 +265,7 @@ class ParsedPath(object):
 
             path_sub_str = self._normal_path[:token_start]
             possible_value = None
-            using_previous = False
+            using_previous = previous_resolve is not None
 
             if key_name in self.skip_keys:  # 1. Skipping validation for key
                 possible_value = path_sub_str
@@ -274,19 +274,19 @@ class ParsedPath(object):
                     "%s: Invalid value found for key %s: %s",
                     self, key_name, path_sub_str,
                 )
-            elif previous_resolve is not None:  # 3. Check if already resolved
-                if path_sub_str == str(previous_resolve):
-                    possible_value = previous_resolve
-                    using_previous = True
-                else:
-                    self._error(
-                        "%s: Conflicting values found for key %s: %s and %s",
-                        self, key_name, previous_resolve, path_sub_str,
-                    )
-            else:  # 4. Check resolved value from substring
+            else:
                 try:
                     possible_value = template_key.value_from_str(path_sub_str)
+
+                    # 3. Check if already resolved
+                    if using_previous and possible_value != previous_resolve:
+                        self._error(
+                            "%s: [%s] Current value (%s) doesn't match "
+                            "previously resolved value (%s)",
+                            self, key_name, possible_value, previous_resolve,
+                        )
                 except TankError as error:
+                    # 4. Check resolved value from substring
                     self._error(
                         "%s: Failed to get value for key '%s' - %r",
                         self, key_name, error,
